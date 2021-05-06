@@ -56,8 +56,6 @@ for _, f := range zipf.File {
 
 ### GDAL I/O handler
 
-*Note: support in godal is not yet merged: see [PR 21](https://github.com/airbusgeo/godal/pull/21)*
-
 Osio is used by the [GDAL](https://gdal.org) [godal bindings](https://github.com/airbusgeo/godal) to
 enable GDAL to directly access files stored on a bucket. (Note: this mechanism only really makes sense
 when accessing file formats that are object-storage friendly, e.g. [cogeotiffs](https://www.cogeo.org) )
@@ -71,8 +69,10 @@ dataset,err := godal.Open("gs://bucket/path/to/cog.tif")
 ...
 ```
 
-## Contributing
+## Contributing and TODOs
 
-Please submit contributions through pull-requests. Currently osio supports access to google cloud storage
-objects, adding adapters for other providers or methods are welcome (e.g. S3, plain HTTP, ...)
+PRs are welcome! If you want to work on any of these things, please open an issue to coordinate.
 
+- [ ] S3 handler
+- [ ] Plain HTTP handler
+- [ ] Azure handler
