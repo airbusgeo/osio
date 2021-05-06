@@ -28,30 +28,29 @@ The following example shows how to extract a single file from a (large) zip arch
 google cloud storage bucket.
 
 ```go
-	ctx := context.Background()
-	gcsr, err := osio.GCSHandle(ctx)
-    /* handle error, typically if credentials could not be found, network down ,etc... */
-	gcs, _ = osio.NewAdapter(gcsr)
+ctx := context.Background()
+gcsr, err := osio.GCSHandle(ctx)
+/* handle error, typically if credentials could not be found, network down ,etc... */
+gcs, _ = osio.NewAdapter(gcsr)
 
-    file := "gs://bucket/path/to/large/archive.zip"
-	obj, err := gcs.Reader(file)
-	if err != nil {
-		return fmt.Errorf("open %s: %w", file, err)
-	}
-	zipf, err := zip.NewReader(obj, obj.Size())
-	if err != nil {
-		return fmt.Errorf("zip corrupted?: %w", err)
-	}
-	for _, f := range zipf.File {
-		if f.Name == "mytargetfile.txt" {
-			fr, err := f.Open()
-			dstf, err := os.Create("/local/mytargetfile.txt")
-			_, err = io.Copy(dstf, fr)
-			fr.Close()
-			err = dstf.Close()
-			//fmt.Printf("extracted %s\n", f.Name)
-		}
-	}
+file := "gs://bucket/path/to/large/archive.zip"
+obj, err := gcs.Reader(file)
+if err != nil {
+ return fmt.Errorf("open %s: %w", file, err)
+}
+zipf, err := zip.NewReader(obj, obj.Size())
+if err != nil {
+ return fmt.Errorf("zip corrupted?: %w", err)
+}
+for _, f := range zipf.File {
+ if f.Name == "mytargetfile.txt" {
+  fr, err := f.Open()
+  dstf, err := os.Create("/local/mytargetfile.txt")
+  _, err = io.Copy(dstf, fr)
+  fr.Close()
+  err = dstf.Close()
+  //fmt.Printf("extracted %s\n", f.Name)
+ }
 }
 ```
 
@@ -64,12 +63,12 @@ enable GDAL to directly access files stored on a bucket. (Note: this mechanism o
 when accessing file formats that are object-storage friendly, e.g. [cogeotiffs](https://www.cogeo.org) )
 
 ```go
-	ctx := context.Background()
-	gcsr, err := osio.GCSHandle(ctx)
-	gcs, _ = osio.NewAdapter(gcsr)
-    godal.RegisterVSIAdapter("gs://", gcs)
-    dataset,err := godal.Open("gs://bucket/path/to/cog.tif")
-    ...
+ctx := context.Background()
+gcsr, err := osio.GCSHandle(ctx)
+gcs, _ = osio.NewAdapter(gcsr)
+godal.RegisterVSIAdapter("gs://", gcs)
+dataset,err := godal.Open("gs://bucket/path/to/cog.tif")
+...
 ```
 
 ## Contributing
