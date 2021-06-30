@@ -16,7 +16,7 @@ func WithS3Region(region string) func(opts *s3.Options) {
 	}
 }
 
-func ExampleS3Handle() {
+func ExampleS3Handle_zip() {
 	ctx := context.Background()
 
 	cfg, _ := config.LoadDefaultConfig(ctx)
@@ -30,5 +30,9 @@ func ExampleS3Handle() {
 
 	for _, f := range zipf.File {
 		fmt.Printf("%s\n", f.Name)
+		break
 	}
+
+	// Output:
+	// S2A_MSIL1C_20210630T074611_N0300_R135_T48XWN_20210630T082841.SAFE/MTD_MSIL1C.xml
 }

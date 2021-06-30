@@ -73,7 +73,37 @@ func HTTPHandle(ctx context.Context, opts ...HTTPOption) (*HTTPHandler, error) {
 	return handler, nil
 }
 
+func handleResponse(r *http.Response) (int, int64, error) {
+	if r.StatusCode == 404 {
+		return 0, -1, syscall.ENOENT
+	}
+	if r.StatusCode == 416 {
+		return 0, 0, io.EOF
+	}
+	return 0, 0, fmt.Errorf("new reader for %s: status code %d", r.Request.URL.String(), r.StatusCode)
+}
+
 func (h *HTTPHandler) ReadAt(url string, p []byte, off int64) (int, int64, error) {
+	// HEAD request to get object size as it is not returned in range requests
+	var size int64
+	if off == 0 {
+		req, _ := http.NewRequest("HEAD", url, nil)
+		req = req.WithContext(h.ctx)
+		for _, mw := range h.requestMiddlewares {
+			mw(req)
+		}
+		r, err := h.client.Do(req)
+		if err != nil {
+			return 0, 0, fmt.Errorf("new reader for %s: %w", url, err)
+		}
+		defer r.Body.Close()
+		if r.StatusCode != 200 {
+			return handleResponse(r)
+		}
+		size = r.ContentLength
+	}
+
+	// GET request to fetch range
 	req, _ := http.NewRequest("GET", url, nil)
 	req = req.WithContext(h.ctx)
 	for _, mw := range h.requestMiddlewares {
@@ -85,20 +115,13 @@ func (h *HTTPHandler) ReadAt(url string, p []byte, off int64) (int, int64, error
 	if err != nil {
 		return 0, 0, fmt.Errorf("new reader for %s: %w", url, err)
 	}
-
-	if r.StatusCode == 404 {
-		return 0, -1, syscall.ENOENT
-	}
-	if r.StatusCode == 416 {
-		return 0, 0, io.EOF
-	}
-	if r.StatusCode != 200 && r.StatusCode != 206 {
-		return 0, 0, fmt.Errorf("new reader for %s: status code %d", url, r.StatusCode)
-	}
 	defer r.Body.Close()
+	if r.StatusCode != 200 && r.StatusCode != 206 {
+		return handleResponse(r)
+	}
 	n, err := io.ReadFull(r.Body, p)
 	if err == io.ErrUnexpectedEOF {
 		err = io.EOF
 	}
-	return n, r.ContentLength, err
+	return n, size, err
 }
