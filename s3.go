@@ -21,6 +21,7 @@ import (
 	"io"
 	"syscall"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -43,6 +44,13 @@ func S3Client(cl *s3.Client) S3Option {
 	}
 }
 
+// S3RequestPayer bills the requester for the request
+func S3RequestPayer() S3Option {
+	return func(o *S3Handler) {
+		o.requestPayer = "requester"
+	}
+}
+
 // S3Handle creates a KeyReaderAt suitable for constructing an Adapter
 // that accesses objects on Amazon S3
 func S3Handle(ctx context.Context, opts ...S3Option) (*S3Handler, error) {
@@ -62,34 +70,54 @@ func S3Handle(ctx context.Context, opts ...S3Option) (*S3Handler, error) {
 	return handler, nil
 }
 
+func handleS3ApiError(err error) (int, int64, error) {
+	var ae smithy.APIError
+	if errors.As(err, &ae) && ae.ErrorCode() == "InvalidRange" {
+		return 0, 0, io.EOF
+	}
+	if errors.As(err, &ae) && (ae.ErrorCode() == "NoSuchBucket" || ae.ErrorCode() == "NoSuchKey" || ae.ErrorCode() == "NotFound") {
+		return 0, -1, syscall.ENOENT
+	}
+	return 0, 0, err
+}
+
 func (h *S3Handler) ReadAt(key string, p []byte, off int64) (int, int64, error) {
 	bucket, object := osuriparse("s3", key)
 	if len(bucket) == 0 || len(object) == 0 {
 		return 0, 0, fmt.Errorf("invalid key")
 	}
 
-	rng := fmt.Sprintf("Range: bytes=%d-%d", off, off+int64(len(p))-1)
+	// HEAD request to get object size as it is not returned in range requests
+	var size int64
+	if off == 0 {
+		r, err := h.client.HeadObject(h.ctx, &s3.HeadObjectInput{
+			Bucket:       &bucket,
+			Key:          &object,
+			RequestPayer: types.RequestPayer(h.requestPayer),
+		})
+		if err != nil {
+			return handleS3ApiError(fmt.Errorf("new reader for %s: %w", key, err))
+		}
+		size = r.ContentLength
+	}
+
+	// GET request to fetch range
 	r, err := h.client.GetObject(h.ctx, &s3.GetObjectInput{
 		Bucket:       &bucket,
 		Key:          &object,
 		RequestPayer: types.RequestPayer(h.requestPayer),
-		Range:        &rng,
+		Range:        aws.String(fmt.Sprintf("bytes=%d-%d", off, off+int64(len(p))-1)),
 	})
-
 	if err != nil {
-		var ae smithy.APIError
-		if off > 0 && errors.As(err, &ae) && ae.ErrorCode() == "InvalidRange" {
-			return 0, 0, io.EOF
-		}
-		if errors.As(err, &ae) && (ae.ErrorCode() == "NoSuchBucket" || ae.ErrorCode() == "NoSuchKey") {
-			return 0, -1, syscall.ENOENT
-		}
-		return 0, 0, fmt.Errorf("new reader for s3://%s/%s: %w", bucket, object, err)
+		return handleS3ApiError(fmt.Errorf("new reader for %s: %w", key, err))
 	}
 	defer r.Body.Close()
+
 	n, err := io.ReadFull(r.Body, p)
 	if err == io.ErrUnexpectedEOF {
 		err = io.EOF
 	}
-	return n, r.ContentLength, err
+
+	//fmt.Printf("read %s [%d-%d]\n", key, off, off+int64(len(p)))
+	return n, size, err
 }
