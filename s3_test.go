@@ -24,9 +24,8 @@ import (
 func TestS3(t *testing.T) {
 	ctx := context.Background()
 	s3cl := s3.New(s3.Options{
-		Region:       "us-west-2",
-		Credentials:  nil,
-		UsePathStyle: true,
+		Region:      "us-west-2",
+		Credentials: nil,
 	})
 	sss, _ := S3Handle(ctx, S3Client(s3cl))
 	s3a, _ := NewAdapter(sss)
