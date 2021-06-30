@@ -73,6 +73,4 @@ dataset,err := godal.Open("gs://bucket/path/to/cog.tif")
 
 PRs are welcome! If you want to work on any of these things, please open an issue to coordinate.
 
-- [ ] S3 handler
-- [ ] Plain HTTP handler
 - [ ] Azure handler
