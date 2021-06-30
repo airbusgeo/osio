@@ -22,12 +22,10 @@ import (
 	"syscall"
 )
 
-type RequestMiddleware func(*http.Request)
-
 type HTTPHandler struct {
 	ctx                context.Context
 	client             *http.Client
-	requestMiddlewares []RequestMiddleware
+	requestMiddlewares []func(*http.Request)
 }
 
 // HTTPOption is an option that can be passed to RegisterHandler
@@ -92,14 +90,17 @@ func (h *HTTPHandler) ReadAt(url string, p []byte, off int64) (int, int64, error
 		for _, mw := range h.requestMiddlewares {
 			mw(req)
 		}
+
 		r, err := h.client.Do(req)
 		if err != nil {
 			return 0, 0, fmt.Errorf("new reader for %s: %w", url, err)
 		}
 		defer r.Body.Close()
+
 		if r.StatusCode != 200 {
 			return handleResponse(r)
 		}
+
 		size = r.ContentLength
 	}
 
@@ -116,9 +117,11 @@ func (h *HTTPHandler) ReadAt(url string, p []byte, off int64) (int, int64, error
 		return 0, 0, fmt.Errorf("new reader for %s: %w", url, err)
 	}
 	defer r.Body.Close()
+
 	if r.StatusCode != 200 && r.StatusCode != 206 {
 		return handleResponse(r)
 	}
+
 	n, err := io.ReadFull(r.Body, p)
 	if err == io.ErrUnexpectedEOF {
 		err = io.EOF

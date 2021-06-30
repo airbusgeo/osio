@@ -18,7 +18,7 @@ of the remote object, for example:
 Under the hood, osio splits the remote object into blocks of fixed sizes (by default 128k), and keeps
 an lru cache of the already downloaded blocks. Subsequent reads from the object will be populated by
 the contents of these cached blocks. An Osio adapter is safe for concurrent usage, and mechanisms are
-in place do de-dpuplicate reads to the source object in case of concurrent access.
+in place do de-duplicate reads to the source object in case of concurrent access.
 
 
 ## Example Usage
@@ -53,6 +53,8 @@ for _, f := range zipf.File {
  }
 }
 ```
+
+Other examples for `s3` can be found [here](doc_test.go).
 
 ### GDAL I/O handler
 
