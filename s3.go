@@ -1,3 +1,5 @@
+// Copyright 2021 Kayrros
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -17,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"syscall"
 
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -82,9 +83,6 @@ func (h *S3Handler) ReadAt(key string, p []byte, off int64) (int, int64, error) 
 		}
 		if errors.As(err, &ae) && (ae.ErrorCode() == "NoSuchBucket" || ae.ErrorCode() == "NoSuchKey") {
 			return 0, -1, syscall.ENOENT
-		}
-		if errors.As(err, &ae) {
-			log.Println(ae.ErrorCode())
 		}
 		return 0, 0, fmt.Errorf("new reader for s3://%s/%s: %w", bucket, object, err)
 	}
