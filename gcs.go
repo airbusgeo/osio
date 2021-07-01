@@ -94,7 +94,7 @@ func (gcs *GCSHandler) ReadAt(key string, p []byte, off int64) (int, int64, erro
 		gbucket = gbucket.UserProject(gcs.billingProjectID)
 	}
 	r, err := gbucket.Object(object).NewRangeReader(gcs.ctx, off, int64(len(p)))
-	//fmt.Printf("read %s [%d-%d]\n", key, off/(1024*1024), (off+int64(len(p)))/(1024*1024))
+	//fmt.Printf("read %s [%d-%d]\n", key, off, off+int64(len(p)))
 	if err != nil {
 		var gerr *googleapi.Error
 		if off > 0 && errors.As(err, &gerr) && gerr.Code == 416 {

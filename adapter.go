@@ -448,7 +448,6 @@ func (a *Adapter) applyBlock(mu *sync.Mutex, block int64, data []byte, written [
 }
 
 func (a *Adapter) ReadAtMulti(key string, bufs [][]byte, offsets []int64) ([]int, error) {
-	//fmt.Printf("readmulti %v\n", offsets)
 	blids := make(map[int64]bool)
 	errmu := sync.Mutex{}
 	for ibuf := range bufs {
@@ -562,7 +561,6 @@ func (a *Adapter) blockKey(key string, id int64) string {
 }
 
 func (a *Adapter) getBlock(key string, id int64) ([]byte, error) {
-	//fmt.Printf("get block %d\n", id)
 	blockData, ok := a.cache.Get(key, uint(id))
 	if ok {
 		return blockData, nil
