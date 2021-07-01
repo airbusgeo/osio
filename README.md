@@ -21,40 +21,79 @@ the contents of these cached blocks. An Osio adapter is safe for concurrent usag
 in place do de-duplicate reads to the source object in case of concurrent access.
 
 
+Osio has support for the following handlers:
+- Google Storage,
+- Amazon S3,
+- Plain HTTP.
+
 ## Example Usage
 
-### Zip extraction
+### Google Storage - Zip extraction
 The following example shows how to extract a single file from a (large) zip archive stored on a
-google cloud storage bucket.
+Google Cloud Storage bucket.
 
 ```go
-ctx := context.Background()
-gcsr, err := osio.GCSHandle(ctx)
-/* handle error, typically if credentials could not be found, network down ,etc... */
-gcs, _ = osio.NewAdapter(gcsr)
+func ExampleGSHandle_zip() {
+    ctx := context.Background()
+    gcsr, err := osio.GCSHandle(ctx)
+    /* handle error, typically if credentials could not be found, network down ,etc... */
+    gcs, _ = osio.NewAdapter(gcsr)
 
-file := "gs://bucket/path/to/large/archive.zip"
-obj, err := gcs.Reader(file)
-if err != nil {
- return fmt.Errorf("open %s: %w", file, err)
-}
-zipf, err := zip.NewReader(obj, obj.Size())
-if err != nil {
- return fmt.Errorf("zip corrupted?: %w", err)
-}
-for _, f := range zipf.File {
- if f.Name == "mytargetfile.txt" {
-  fr, err := f.Open()
-  dstf, err := os.Create("/local/mytargetfile.txt")
-  _, err = io.Copy(dstf, fr)
-  fr.Close()
-  err = dstf.Close()
-  //fmt.Printf("extracted %s\n", f.Name)
- }
+    file := "gs://bucket/path/to/large/archive.zip"
+    obj, err := gcs.Reader(file)
+    if err != nil {
+        return fmt.Errorf("open %s: %w", file, err)
+    }
+    zipf, err := zip.NewReader(obj, obj.Size())
+    if err != nil {
+        return fmt.Errorf("zip corrupted?: %w", err)
+    }
+    for _, f := range zipf.File {
+        if f.Name == "mytargetfile.txt" {
+            fr, err := f.Open()
+            dstf, err := os.Create("/local/mytargetfile.txt")
+            _, err = io.Copy(dstf, fr)
+            fr.Close()
+            err = dstf.Close()
+            //fmt.Printf("extracted %s\n", f.Name)
+        }
+    }
 }
 ```
 
-Other examples for `s3` can be found [here](doc_test.go).
+
+### Amazon S3 - Zip extraction
+
+
+```go
+func WithS3Region(region string) func(opts *s3.Options) {
+	return func(opts *s3.Options) {
+		opts.Region = region
+	}
+}
+
+func ExampleS3Handle_zip() {
+	ctx := context.Background()
+
+	cfg, _ := config.LoadDefaultConfig(ctx)
+	s3cl := s3.NewFromConfig(cfg, WithS3Region("eu-central-1"))
+	s3r, _ := osio.S3Handle(ctx, osio.S3Client(s3cl), osio.S3RequestPayer())
+	osr, _ := osio.NewAdapter(s3r)
+
+	uri := "s3://sentinel-s2-l1c-zips/S2A_MSIL1C_20210630T074611_N0300_R135_T48XWN_20210630T082841.zip"
+	obj, _ := osr.Reader(uri)
+	zipf, _ := zip.NewReader(obj, obj.Size())
+
+	for _, f := range zipf.File {
+		fmt.Printf("%s\n", f.Name)
+		break
+	}
+
+	// Output:
+	// S2A_MSIL1C_20210630T074611_N0300_R135_T48XWN_20210630T082841.SAFE/MTD_MSIL1C.xml
+}
+```
+
 
 ### GDAL I/O handler
 
