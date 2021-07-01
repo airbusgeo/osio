@@ -411,7 +411,6 @@ func (a *Adapter) getRange(key string, rng blockRange) ([][]byte, error) {
 		}(int64(i))
 	}
 	wg.Wait()
-	//no need to unlock, as none were aquired in this case
 	return blocks, err
 }
 

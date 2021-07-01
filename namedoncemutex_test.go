@@ -58,4 +58,6 @@ func TestNamedOnceMutex(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	n1.Unlock(key)
 	<-ww
+
+	n1.Unlock(key) //check second unlock
 }
