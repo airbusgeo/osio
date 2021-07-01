@@ -355,3 +355,79 @@ func TestReader(t *testing.T) {
 	assert.Equal(t, []byte{255, 255, 255, 255}, bufs[1])
 
 }
+
+type EReader struct {
+	errbuf []byte
+	delay  time.Duration
+	erroff int64
+	err    error
+}
+
+func (r EReader) ReadAt(key string, buf []byte, off int64) (int, int64, error) {
+	ll := int64(len(r.errbuf))
+	time.Sleep(r.delay)
+	if r.err != nil && off >= r.erroff {
+		return 0, 0, r.err
+	}
+	if int(off) > len(r.errbuf) {
+		return 0, ll, io.EOF
+	}
+	n := copy(buf, r.errbuf[off:])
+	var err error
+	if n < len(buf) {
+		err = io.EOF
+	}
+	return n, ll, err
+}
+
+//provide test coverage of reader errors in multi-block requests
+func TestRangeErrors(t *testing.T) {
+	//check small last block
+	er := EReader{
+		delay:  100 * time.Millisecond,
+		errbuf: []byte("abcd-efgh-ijkl-m"),
+	}
+	bc, _ := NewAdapter(er, BlockSize("5"))
+
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 15)
+		_, err := bc.ReadAt("", buf, 0)
+		assert.NoError(t, err)
+	}()
+	time.Sleep(5 * time.Millisecond)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 7)
+		_, err := bc.ReadAt("", buf, 11)
+		assert.ErrorIs(t, err, io.EOF)
+	}()
+	wg.Wait()
+
+	//check reader error returned
+	er = EReader{
+		delay:  100 * time.Millisecond,
+		errbuf: []byte("abcd-efgh-ijkl-m"),
+		erroff: 15,
+		err:    fmt.Errorf("foo"),
+	}
+	bc, _ = NewAdapter(er, BlockSize("5"))
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 15)
+		_, err := bc.ReadAt("", buf, 0)
+		assert.NoError(t, err)
+	}()
+	time.Sleep(5 * time.Millisecond)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 15)
+		_, err := bc.ReadAt("", buf, 6)
+		assert.Equal(t, "foo", err.Error())
+	}()
+	wg.Wait()
+}
