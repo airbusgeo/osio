@@ -27,7 +27,6 @@ import (
 	"unicode"
 
 	lru "github.com/hashicorp/golang-lru"
-	"github.com/vburenin/nsync"
 )
 
 // KeyReaderAt is the interface that wraps the basic ReadAt method for the specified key.
@@ -89,6 +88,10 @@ type NamedOnceMutex interface {
 	//Lock aquires a lock to the resource and returns true. If the keyed resource is already locked,
 	//Lock waits until the resource has been unlocked and returns false
 	Lock(key interface{}) bool
+	//TryLock tries to acquire a lock on a keyed resource. If the keyed resource is not already locked,
+	//TryLock aquires a lock to the resource and returns true. If the keyed resource is already locked,
+	//TryLock returns false immediately
+	TryLock(key interface{}) bool
 	//Unlock a keyed resource. Should be called by a client whose call to Lock returned true once the
 	//resource is ready for consumption by other clients
 	Unlock(key interface{})
@@ -307,7 +310,7 @@ func NewAdapter(reader KeyReaderAt, opts ...AdapterOption) (*Adapter, error) {
 		return nil, fmt.Errorf("invalid options: NumCachedBlocks may not be used alongside BlockCache")
 	}
 	if bc.blmu == nil {
-		bc.blmu = nsync.NewNamedOnceMutex()
+		bc.blmu = newNamedOnceMutex()
 	}
 	if bc.cache == nil {
 		bc.cache, _ = NewLRUCache(bc.numCachedBlocks)
@@ -331,39 +334,85 @@ func min(n1, n2 int64) int64 {
 }
 
 func (a *Adapter) getRange(key string, rng blockRange) ([][]byte, error) {
-	//fmt.Printf("getrange [%d-%d]\n", rng.start, rng.end)
 	blocks := make([][]byte, rng.end-rng.start+1)
-	var err error
-	if rng.start == rng.end {
-		blocks[0], err = a.getBlock(key, int64(rng.start))
-		return blocks, err
+	toFetch := make([]bool, rng.end-rng.start+1)
+	nToFetch := 0
+	for i := rng.start; i <= rng.end; i++ {
+		blockID := a.blockKey(key, i)
+		if toFetch[i-rng.start] = a.blmu.TryLock(blockID); toFetch[i-rng.start] {
+			nToFetch++
+		}
 	}
-	done := make(chan bool)
-	defer close(done)
+	if nToFetch == len(blocks) {
+		buf := make([]byte, (rng.end-rng.start+1)*a.blockSize)
+		n, err := a.srcReadAt(key, buf, rng.start*a.blockSize)
+		if err != nil && !errors.Is(err, io.EOF) {
+			for i := rng.start; i <= rng.end; i++ {
+				blockID := a.blockKey(key, i)
+				a.blmu.Unlock(blockID)
+			}
+			return nil, err
+		}
+		left := int64(n)
+		for bid := int64(0); bid <= rng.end-rng.start && left > 0; bid++ {
+			ll := min(left, a.blockSize)
+			blocks[bid] = make([]byte, ll)
+			copy(blocks[bid], buf[bid*a.blockSize:bid*a.blockSize+ll])
+			left -= ll
+			a.cache.Add(key, uint(rng.start+bid), blocks[bid])
+		}
+		for i := rng.start; i <= rng.end; i++ {
+			blockID := a.blockKey(key, i)
+			a.blmu.Unlock(blockID)
+		}
+		return blocks, nil
+	}
+	var err error
+	errmu := sync.Mutex{}
+	//for the blocks we managed to lock: fetch ourselves
+	//for the blocks that were already locked by someone else: getBlock()
+	wg := sync.WaitGroup{}
+	wg.Add(len(blocks))
 	for i := rng.start; i <= rng.end; i++ {
 		go func(id int64) {
-			blockID := a.blockKey(key, id)
-			if a.blmu.Lock(blockID) {
-				//unlock block once we've finished
-				<-done
-				a.blmu.Unlock(blockID)
+			defer wg.Done()
+			var berr error
+			if !toFetch[id-rng.start] {
+				blocks[id-rng.start], berr = a.getBlock(key, id)
+			} else {
+				var n int
+				blocks[id-rng.start] = make([]byte, a.blockSize)
+				n, berr = a.srcReadAt(key, blocks[id-rng.start], id*a.blockSize)
+				if errors.Is(berr, io.EOF) {
+					berr = nil
+				}
+				if berr != nil {
+					blockID := a.blockKey(key, id)
+					a.blmu.Unlock(blockID)
+				} else {
+					if n != int(a.blockSize) {
+						//if smaller than block size, store smaller block to cache
+						smallbuf := make([]byte, n)
+						copy(smallbuf, blocks[id-rng.start])
+						blocks[id-rng.start] = smallbuf
+					}
+					a.cache.Add(key, uint(id), blocks[id-rng.start])
+					blockID := a.blockKey(key, id)
+					a.blmu.Unlock(blockID)
+				}
+			}
+			if berr != nil {
+				errmu.Lock()
+				if err == nil {
+					err = berr
+				}
+				errmu.Unlock()
 			}
 		}(int64(i))
 	}
-	buf := make([]byte, (rng.end-rng.start+1)*a.blockSize)
-	n, err := a.srcReadAt(key, buf, rng.start*a.blockSize)
-	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, err
-	}
-	left := int64(n)
-	for bid := int64(0); bid <= rng.end-rng.start && left > 0; bid++ {
-		ll := min(left, a.blockSize)
-		blocks[bid] = make([]byte, ll)
-		copy(blocks[bid], buf[bid*a.blockSize:bid*a.blockSize+ll])
-		left -= ll
-		a.cache.Add(key, uint(rng.start+bid), blocks[bid])
-	}
-	return blocks, nil
+	wg.Wait()
+	//no need to unlock, as none were aquired in this case
+	return blocks, err
 }
 
 func (a *Adapter) applyBlock(mu *sync.Mutex, block int64, data []byte, written []int, bufs [][]byte, offsets []int64) {
@@ -400,6 +449,7 @@ func (a *Adapter) applyBlock(mu *sync.Mutex, block int64, data []byte, written [
 }
 
 func (a *Adapter) ReadAtMulti(key string, bufs [][]byte, offsets []int64) ([]int, error) {
+	//fmt.Printf("readmulti %v\n", offsets)
 	blids := make(map[int64]bool)
 	errmu := sync.Mutex{}
 	for ibuf := range bufs {
@@ -513,6 +563,7 @@ func (a *Adapter) blockKey(key string, id int64) string {
 }
 
 func (a *Adapter) getBlock(key string, id int64) ([]byte, error) {
+	//fmt.Printf("get block %d\n", id)
 	blockData, ok := a.cache.Get(key, uint(id))
 	if ok {
 		return blockData, nil
