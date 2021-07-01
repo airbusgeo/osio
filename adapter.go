@@ -258,8 +258,11 @@ func (b srao) adapterOpt(a *Adapter) error {
 	return nil
 }
 
-//SplitRanges is an option to prevent making MultiRead try to merge
-//consecutive ranges into a single block request
+// SplitRanges is an option to prevent making MultiRead try to merge
+// consecutive ranges into a single block request
+//
+// Deprecated: osio now automatically splits a request into individual
+// blocks when needed
 func SplitRanges(splitRanges bool) interface {
 	AdapterOption
 } {
