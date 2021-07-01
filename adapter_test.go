@@ -389,18 +389,22 @@ func TestRangeErrors(t *testing.T) {
 	}
 	bc, _ := NewAdapter(er, BlockSize("5"))
 
+	wg := sync.WaitGroup{}
+	wg.Add(2)
 	go func() {
+		defer wg.Done()
 		buf := make([]byte, 15)
 		_, err := bc.ReadAt("", buf, 0)
 		assert.NoError(t, err)
 	}()
 	time.Sleep(5 * time.Millisecond)
 	go func() {
+		defer wg.Done()
 		buf := make([]byte, 7)
 		_, err := bc.ReadAt("", buf, 11)
 		assert.ErrorIs(t, err, io.EOF)
 	}()
-	time.Sleep(110 * time.Millisecond)
+	wg.Wait()
 
 	//check reader error returned
 	er = EReader{
@@ -411,16 +415,19 @@ func TestRangeErrors(t *testing.T) {
 	}
 	bc, _ = NewAdapter(er, BlockSize("5"))
 
+	wg.Add(2)
 	go func() {
+		defer wg.Done()
 		buf := make([]byte, 15)
 		_, err := bc.ReadAt("", buf, 0)
 		assert.NoError(t, err)
 	}()
 	time.Sleep(5 * time.Millisecond)
 	go func() {
+		defer wg.Done()
 		buf := make([]byte, 15)
 		_, err := bc.ReadAt("", buf, 6)
 		assert.Equal(t, "foo", err.Error())
 	}()
-	time.Sleep(110 * time.Millisecond)
+	wg.Wait()
 }
