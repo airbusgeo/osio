@@ -24,8 +24,10 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unicode"
 
+	"github.com/airbusgeo/errs"
 	lru "github.com/hashicorp/golang-lru"
 )
 
@@ -109,10 +111,25 @@ type Adapter struct {
 	reader          KeyReaderAt
 	splitRanges     bool
 	sizeCache       *lru.Cache
+	retries         int
 }
 
 func (a *Adapter) srcReadAt(key string, buf []byte, off int64) (int, error) {
-	n, tot, err := a.reader.ReadAt(key, buf, off)
+	try := 1
+	delay := 100 * time.Millisecond
+	var n int
+	var tot int64
+	var err error
+	for {
+		n, tot, err = a.reader.ReadAt(key, buf, off)
+		if err != nil && try <= a.retries && errs.Temporary(err) {
+			try++
+			time.Sleep(delay)
+			delay *= 2
+			continue
+		}
+		break
+	}
 	if off == 0 {
 		if err != nil {
 			if errors.Is(err, syscall.ENOENT) {
@@ -258,6 +275,26 @@ func (b srao) adapterOpt(a *Adapter) error {
 	return nil
 }
 
+// Retries is an option to set the number of times a ReadAt() will be retried
+// if it returns a temporary/transient error
+func Retries(retries int) interface {
+	AdapterOption
+} {
+	return rao{retries: retries}
+}
+
+type rao struct {
+	retries int
+}
+
+func (r rao) adapterOpt(a *Adapter) error {
+	if r.retries < 0 {
+		return fmt.Errorf("retries must be >= 0")
+	}
+	a.retries = r.retries
+	return nil
+}
+
 // SplitRanges is an option to prevent making MultiRead try to merge
 // consecutive ranges into a single block request
 //
@@ -303,6 +340,7 @@ func NewAdapter(reader KeyReaderAt, opts ...AdapterOption) (*Adapter, error) {
 		numCachedBlocks: DefaultNumCachedBlocks,
 		reader:          reader,
 		splitRanges:     false,
+		retries:         5,
 	}
 	for _, o := range opts {
 		if err := o.adapterOpt(bc); err != nil {
