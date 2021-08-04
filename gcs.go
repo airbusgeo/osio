@@ -19,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"syscall"
 
 	"cloud.google.com/go/storage"
@@ -70,22 +69,8 @@ func GCSHandle(ctx context.Context, opts ...GCSOption) (*GCSHandler, error) {
 	return handler, nil
 }
 
-func gcsparse(gsUri string) (bucket, object string) {
-	gsUri = strings.TrimPrefix(gsUri, "gs://")
-	gsUri = strings.TrimLeft(gsUri, "/")
-	firstSlash := strings.Index(gsUri, "/")
-	if firstSlash == -1 {
-		bucket = gsUri
-		object = ""
-	} else {
-		bucket = gsUri[0:firstSlash]
-		object = gsUri[firstSlash+1:]
-	}
-	return
-}
-
 func (gcs *GCSHandler) ReadAt(key string, p []byte, off int64) (int, int64, error) {
-	bucket, object := gcsparse(key)
+	bucket, object := osuriparse("gs", key)
 	if len(bucket) == 0 || len(object) == 0 {
 		return 0, 0, fmt.Errorf("invalid key")
 	}
