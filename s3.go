@@ -53,7 +53,7 @@ func S3RequestPayer() S3Option {
 
 // S3Handle creates a KeyReaderAt suitable for constructing an Adapter
 // that accesses objects on Amazon S3
-func S3Handle(ctx context.Context, opts ...S3Option) (*S3Handler, error) {
+func S3Handle(ctx context.Context, opts ...S3Option) (KeyReaderAt, error) {
 	handler := &S3Handler{
 		ctx: ctx,
 	}
@@ -67,24 +67,24 @@ func S3Handle(ctx context.Context, opts ...S3Option) (*S3Handler, error) {
 		}
 		handler.client = s3.NewFromConfig(cfg)
 	}
-	return handler, nil
+	return keyReaderAtWrapper{handler}, nil
 }
 
-func handleS3ApiError(err error) (int, int64, error) {
+func handleS3ApiError(err error) (io.ReadCloser, int64, error) {
 	var ae smithy.APIError
 	if errors.As(err, &ae) && ae.ErrorCode() == "InvalidRange" {
-		return 0, 0, io.EOF
+		return nil, 0, io.EOF
 	}
 	if errors.As(err, &ae) && (ae.ErrorCode() == "NoSuchBucket" || ae.ErrorCode() == "NoSuchKey" || ae.ErrorCode() == "NotFound") {
-		return 0, -1, syscall.ENOENT
+		return nil, -1, syscall.ENOENT
 	}
-	return 0, 0, err
+	return nil, 0, err
 }
 
-func (h *S3Handler) ReadAt(key string, p []byte, off int64) (int, int64, error) {
+func (h *S3Handler) StreamAt(key string, off int64, n int64) (io.ReadCloser, int64, error) {
 	bucket, object := osuriparse("s3", key)
 	if len(bucket) == 0 || len(object) == 0 {
-		return 0, 0, fmt.Errorf("invalid key")
+		return nil, 0, fmt.Errorf("invalid key")
 	}
 
 	// HEAD request to get object size as it is not returned in range requests
@@ -96,7 +96,7 @@ func (h *S3Handler) ReadAt(key string, p []byte, off int64) (int, int64, error) 
 			RequestPayer: types.RequestPayer(h.requestPayer),
 		})
 		if err != nil {
-			return handleS3ApiError(fmt.Errorf("new reader for %s: %w", key, err))
+			return handleS3ApiError(fmt.Errorf("new reader for s3://%s/%s: %w", bucket, object, err))
 		}
 		size = r.ContentLength
 	}
@@ -106,18 +106,10 @@ func (h *S3Handler) ReadAt(key string, p []byte, off int64) (int, int64, error) 
 		Bucket:       &bucket,
 		Key:          &object,
 		RequestPayer: types.RequestPayer(h.requestPayer),
-		Range:        aws.String(fmt.Sprintf("bytes=%d-%d", off, off+int64(len(p))-1)),
+		Range:        aws.String(fmt.Sprintf("bytes=%d-%d", off, off+n-1)),
 	})
 	if err != nil {
-		return handleS3ApiError(fmt.Errorf("new reader for %s: %w", key, err))
+		return handleS3ApiError(fmt.Errorf("new reader for s3://%s/%s: %w", bucket, object, err))
 	}
-	defer r.Body.Close()
-
-	n, err := io.ReadFull(r.Body, p)
-	if err == io.ErrUnexpectedEOF {
-		err = io.EOF
-	}
-
-	//fmt.Printf("read %s [%d-%d]\n", key, off, off+int64(len(p)))
-	return n, size, err
+	return r.Body, size, err
 }

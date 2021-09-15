@@ -52,7 +52,7 @@ func GCSBillingProject(projectID string) GCSOption {
 
 // GCSHandle creates a KeyReaderAt suitable for constructing an Adapter
 // that accesses objects on Google Cloud Storage
-func GCSHandle(ctx context.Context, opts ...GCSOption) (*GCSHandler, error) {
+func GCSHandle(ctx context.Context, opts ...GCSOption) (KeyReaderAt, error) {
 	handler := &GCSHandler{
 		ctx: ctx,
 	}
@@ -66,34 +66,28 @@ func GCSHandle(ctx context.Context, opts ...GCSOption) (*GCSHandler, error) {
 		}
 		handler.client = cl
 	}
-	return handler, nil
+	return keyReaderAtWrapper{handler}, nil
 }
 
-func (gcs *GCSHandler) ReadAt(key string, p []byte, off int64) (int, int64, error) {
+func (gcs *GCSHandler) StreamAt(key string, off int64, n int64) (io.ReadCloser, int64, error) {
 	bucket, object := osuriparse("gs", key)
 	if len(bucket) == 0 || len(object) == 0 {
-		return 0, 0, fmt.Errorf("invalid key")
+		return nil, 0, fmt.Errorf("invalid key")
 	}
 	gbucket := gcs.client.Bucket(bucket)
 	if gcs.billingProjectID != "" {
 		gbucket = gbucket.UserProject(gcs.billingProjectID)
 	}
-	r, err := gbucket.Object(object).NewRangeReader(gcs.ctx, off, int64(len(p)))
-	//fmt.Printf("read %s [%d-%d]\n", key, off, off+int64(len(p)))
+	r, err := gbucket.Object(object).NewRangeReader(gcs.ctx, off, n)
 	if err != nil {
 		var gerr *googleapi.Error
 		if off > 0 && errors.As(err, &gerr) && gerr.Code == 416 {
-			return 0, 0, io.EOF
+			return nil, 0, io.EOF
 		}
 		if errors.Is(err, storage.ErrObjectNotExist) || errors.Is(err, storage.ErrBucketNotExist) {
-			return 0, -1, syscall.ENOENT
+			return nil, -1, syscall.ENOENT
 		}
-		return 0, 0, fmt.Errorf("new reader for gs://%s/%s: %w", bucket, object, err)
+		return nil, 0, fmt.Errorf("new reader for gs://%s/%s: %w", bucket, object, err)
 	}
-	defer r.Close()
-	n, err := io.ReadFull(r, p)
-	if err == io.ErrUnexpectedEOF {
-		err = io.EOF
-	}
-	return n, r.Attrs.Size, err
+	return r, r.Attrs.Size, err
 }
