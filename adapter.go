@@ -387,19 +387,20 @@ func SizeCache(numEntries int) interface {
 	return scao{numEntries}
 }
 
-// NewAdapter creates a caching adapter around the provided KeyReaderAt
-//
-// NewAdapter will only return an error if you do not provide plausible options
-// (e.g. negative number of blocks or sizes, nil caches, etc...)
 const (
 	DefaultBlockSize       = 128 * 1024
 	DefaultNumCachedBlocks = 100
 )
 
+// NewAdapter creates a caching adapter around the provided KeyReaderAt.
+//
+// NewAdapter will only return an error if you do not provide plausible options
+// (e.g. negative number of blocks or sizes, nil caches, etc...)
 func NewAdapter(keyReader KeyReaderAt, opts ...AdapterOption) (*Adapter, error) {
 	return newAdapter(keyReader, nil, opts...)
 }
 
+// NewStreamingAdapter creates a caching adapter around the provided KeyStreamerAt.
 func NewStreamingAdapter(keyStreamer KeyStreamerAt, opts ...AdapterOption) (*Adapter, error) {
 	keyReader, ok := keyStreamer.(KeyReaderAt)
 	if !ok {
