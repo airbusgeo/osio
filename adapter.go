@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"sort"
 	"strconv"
@@ -81,7 +82,7 @@ func (w readerAtToStreamerAtWrapper) StreamAt(key string, off int64, tot int64) 
 	if err == io.EOF {
 		err = nil
 	}
-	return io.NopCloser(bytes.NewReader(p[:n])), size, err
+	return ioutil.NopCloser(bytes.NewReader(p[:n])), size, err
 }
 
 // BlockCacher is the interface that wraps block caching functionality
