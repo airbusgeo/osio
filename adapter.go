@@ -60,7 +60,7 @@ type KeyStreamerAt interface {
 	// If the stream fails because the object does not exist, StreamAt must return syscall.ENOENT
 	// (or a wrapped error of syscall.ENOENT)
 	//
-	// The reader returns by StreamAt must follow the standard io.ReadCloser convention with respect
+	// The reader returned by StreamAt must follow the standard io.ReadCloser convention with respect
 	// to error handling.
 	//
 	// Clients of StreamAt can execute parallel StreamAt calls on the same input source.
@@ -111,7 +111,8 @@ type NamedOnceMutex interface {
 	Unlock(key interface{})
 }
 
-// Adapter caches fixed-sized chunks of a KeyStreamerAt, and exposes a proxy KeyStreamerAt
+// Adapter caches fixed-sized chunks of a KeyStreamerAt, and exposes
+// ReadAt(key string, buf []byte, offset int64) (int, error)
 // that feeds from its internal cache, only falling back to the provided KeyStreamerAt whenever
 // data could not be retrieved from its internal cache, while ensuring that concurrent requests
 // only result in a single call to the source reader.
