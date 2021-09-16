@@ -93,5 +93,5 @@ func (gcs *GCSHandler) StreamAt(key string, off int64, n int64) (io.ReadCloser, 
 }
 
 func (gcs *GCSHandler) ReadAt(key string, p []byte, off int64) (int, int64, error) {
-	return keyReadFull(gcs, key, p, off)
+	panic("deprecated (kept for retrocompatibility)")
 }

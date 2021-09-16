@@ -15,6 +15,7 @@
 package osio
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -33,74 +34,54 @@ import (
 
 // KeyReaderAt is the interface that wraps the basic ReadAt method for the specified key.
 //
-// For performance reasons, as we expect the ReadAt method to perform network access and thus
-// be relatively slow, the ReadAt method diverges somewhat from the standard io.ReaderAt interface:
-//
-// • ReadAt should return ENOENT in case of an error due to an inexistant file. This non-existant
-// status is cached by the Adapter in order to prevent subsequent calls to the same key.
-//
-// • ReadAt should return the total size of the object when called with a 0 offset. This is required
-// in order to implement the io.Seeker interface, and to detect out of bounds accesses without incurring
-// a network access. If you do not rely on this functionality, your implementation may return math.MaxInt64
-
+// Deprecated: Use KeyStreamerAt instead.
 type KeyReaderAt interface {
 	// ReadAt reads len(p) bytes from the resource identified by key into p
 	// starting at offset off. It returns the number of bytes read (0 <= n <= len(p)) and
 	// any error encountered.
 	//
-	// If the read fails because the object does not exist, ReadAt must return syscall.ENOENT
-	// (or a wrapped error of syscall.ENOENT)
-	//
-	// When ReadAt returns n < len(p), it returns a non-nil error explaining why more bytes
-	// were not returned. In this respect, ReadAt is stricter than io.Read.
-	//
-	// Even if ReadAt returns n < len(p), it may use all of p as scratch space during the call.
-	// If some data is available but not len(p) bytes, ReadAt blocks until either all the data
-	// is available or an error occurs. In this respect ReadAt is different from io.Read.
-	//
-	// If the n = len(p) bytes returned by ReadAt are at the end of the input source, ReadAt
-	// may return either err == io.EOF or err == nil.
-	//
-	// If ReadAt is reading from an input source with a seek offset, ReadAt should not affect
-	// nor be affected by the underlying seek offset.
-	//
-	// Clients of ReadAt can execute parallel ReadAt calls on the same input source.
-	//
-	// If called with off==0, ReadAt must also return the total object size in its second
-	// return value
-	//
-	// Implementations must not retain p.
+	// Deprecated: Use StreamAt instead.
 	ReadAt(key string, p []byte, off int64) (int, int64, error)
 }
 
 // KeyStreamerAt is the second interface a handler can implement.
-// The same conventions as KeyReaderAt apply with respect to the object size and the
-// error handling.
-// A reader that implements KeyStreamerAt and does not implement KeyReaderAt can
-// be wrapped using KeyReaderAtWrapper.
+//
+// • StreamAt should return ENOENT in case of an error due to an inexistant file. This non-existant
+// status is cached by the Adapter in order to prevent subsequent calls to the same key.
+//
+// • StreamAt should return the total size of the object when called with a 0 offset. This is required
+// in order to implement the io.Seeker interface, and to detect out of bounds accesses without incurring
+// a network access. If you do not rely on this functionality, your implementation may return math.MaxInt64
 type KeyStreamerAt interface {
+	// StreamAt returns a io.ReadCloser on a section from the resource identified by key
+	// starting at offset off. It returns any error encountered.
+	//
+	// If the stream fails because the object does not exist, StreamAt must return syscall.ENOENT
+	// (or a wrapped error of syscall.ENOENT)
+	//
+	// The reader returns by StreamAt must follow the standard io.ReadCloser convention with respect
+	// to error handling.
+	//
+	// Clients of StreamAt can execute parallel StreamAt calls on the same input source.
+	//
+	// If called with off==0, StreamAt must also return the total object size in its second
+	// return value
+	//
+	// The caller of StreamAt is responsible for closing the stream.
 	StreamAt(key string, off int64, n int64) (io.ReadCloser, int64, error)
 }
 
-func keyReadFull(s KeyStreamerAt, key string, p []byte, off int64) (int, int64, error) {
-	r, size, err := s.StreamAt(key, off, int64(len(p)))
-	if err != nil {
-		return 0, size, err
-	}
-	defer r.Close()
-	n, err := io.ReadFull(r, p)
-	if err == io.ErrUnexpectedEOF {
-		err = io.EOF
-	}
-	return n, size, err
+type readerAtToStreamerAtWrapper struct {
+	KeyReaderAt
 }
 
-type keyReaderAtWrapper struct {
-	KeyStreamerAt
-}
-
-func (w keyReaderAtWrapper) ReadAt(key string, p []byte, off int64) (int, int64, error) {
-	return keyReadFull(w, key, p, off)
+func (w readerAtToStreamerAtWrapper) StreamAt(key string, off int64, tot int64) (io.ReadCloser, int64, error) {
+	p := make([]byte, tot)
+	n, size, err := w.ReadAt(key, p, off)
+	if err == io.EOF {
+		err = nil
+	}
+	return io.NopCloser(bytes.NewReader(p[:n])), size, err
 }
 
 // BlockCacher is the interface that wraps block caching functionality
@@ -129,8 +110,8 @@ type NamedOnceMutex interface {
 	Unlock(key interface{})
 }
 
-// Adapter caches fixed-sized chunks of a KeyReaderAt, and exposes a proxy KeyReaderAt
-// that feeds from its internal cache, only falling back to the provided KeyReaderAt whenever
+// Adapter caches fixed-sized chunks of a KeyStreamerAt, and exposes a proxy KeyStreamerAt
+// that feeds from its internal cache, only falling back to the provided KeyStreamerAt whenever
 // data could not be retrieved from its internal cache, while ensuring that concurrent requests
 // only result in a single call to the source reader.
 type Adapter struct {
@@ -138,7 +119,6 @@ type Adapter struct {
 	blmu            NamedOnceMutex
 	numCachedBlocks int
 	cache           BlockCacher
-	keyReader       KeyReaderAt
 	keyStreamer     KeyStreamerAt
 	splitRanges     bool
 	sizeCache       *lru.Cache
@@ -166,9 +146,6 @@ func (a *Adapter) srcStreamAt(key string, off int64, n int64) (io.ReadCloser, er
 			if errors.Is(err, syscall.ENOENT) {
 				a.sizeCache.Add(key, int64(-1))
 			}
-			if errors.Is(err, io.EOF) {
-				a.sizeCache.Add(key, tot)
-			}
 		} else {
 			a.sizeCache.Add(key, tot)
 		}
@@ -176,33 +153,15 @@ func (a *Adapter) srcStreamAt(key string, off int64, n int64) (io.ReadCloser, er
 	return r, err
 }
 
-func (a *Adapter) srcReadAt(key string, buf []byte, off int64) (int, error) {
-	try := 1
-	delay := 100 * time.Millisecond
-	var n int
-	var tot int64
-	var err error
-	for {
-		n, tot, err = a.keyReader.ReadAt(key, buf, off)
-		if err != nil && try <= a.retries && errs.Temporary(err) {
-			try++
-			time.Sleep(delay)
-			delay *= 2
-			continue
-		}
-		break
+func (a *Adapter) srcReadAt(key string, p []byte, off int64) (int, error) {
+	r, err := a.srcStreamAt(key, off, int64(len(p)))
+	if err != nil {
+		return 0, err
 	}
-	if off == 0 {
-		if err != nil {
-			if errors.Is(err, syscall.ENOENT) {
-				a.sizeCache.Add(key, int64(-1))
-			}
-			if errors.Is(err, io.EOF) {
-				a.sizeCache.Add(key, tot)
-			}
-		} else {
-			a.sizeCache.Add(key, tot)
-		}
+	defer r.Close()
+	n, err := io.ReadFull(r, p)
+	if err == io.ErrUnexpectedEOF {
+		err = io.EOF
 	}
 	return n, err
 }
@@ -380,7 +339,7 @@ func (b scao) adapterOpt(a *Adapter) error {
 
 // SizeCache is an option that determines how many key sizes will be cached by
 // the adapter. Having a size cache speeds up the opening of files by not requiring
-// that a lookup to the KeyReaderAt for the object size.
+// that a lookup to the KeyStreamerAt for the object size.
 func SizeCache(numEntries int) interface {
 	AdapterOption
 } {
@@ -396,25 +355,24 @@ const (
 //
 // NewAdapter will only return an error if you do not provide plausible options
 // (e.g. negative number of blocks or sizes, nil caches, etc...)
+//
+// Deprecated: use NewStreamingAdapter instead.
 func NewAdapter(keyReader KeyReaderAt, opts ...AdapterOption) (*Adapter, error) {
-	return newAdapter(keyReader, nil, opts...)
+	if sa, ok := keyReader.(KeyStreamerAt); ok {
+		return NewStreamingAdapter(sa, opts...)
+	}
+	return NewStreamingAdapter(readerAtToStreamerAtWrapper{keyReader}, opts...)
 }
 
 // NewStreamingAdapter creates a caching adapter around the provided KeyStreamerAt.
+//
+// NewStreamingAdapter will only return an error if you do not provide plausible options
+// (e.g. negative number of blocks or sizes, nil caches, etc...)
 func NewStreamingAdapter(keyStreamer KeyStreamerAt, opts ...AdapterOption) (*Adapter, error) {
-	keyReader, ok := keyStreamer.(KeyReaderAt)
-	if !ok {
-		keyReader = keyReaderAtWrapper{keyStreamer}
-	}
-	return newAdapter(keyReader, keyStreamer, opts...)
-}
-
-func newAdapter(keyReader KeyReaderAt, keyStreamer KeyStreamerAt, opts ...AdapterOption) (*Adapter, error) {
 	bc := &Adapter{
 		blockSize:       DefaultBlockSize,
 		numCachedBlocks: DefaultNumCachedBlocks,
 		keyStreamer:     keyStreamer,
-		keyReader:       keyReader,
 		splitRanges:     false,
 		retries:         5,
 	}
@@ -443,13 +401,6 @@ type blockRange struct {
 	end   int64
 }
 
-func min(n1, n2 int64) int64 {
-	if n1 > n2 {
-		return n2
-	}
-	return int64(n1)
-}
-
 func (a *Adapter) getRange(key string, rng blockRange) ([][]byte, error) {
 	blocks := make([][]byte, rng.end-rng.start+1)
 	toFetch := make([]bool, rng.end-rng.start+1)
@@ -460,7 +411,7 @@ func (a *Adapter) getRange(key string, rng blockRange) ([][]byte, error) {
 			nToFetch++
 		}
 	}
-	if nToFetch == len(blocks) && a.keyStreamer != nil {
+	if nToFetch == len(blocks) {
 		r, err := a.srcStreamAt(key, rng.start*a.blockSize, (rng.end-rng.start+1)*a.blockSize)
 		if err != nil {
 			for i := rng.start; i <= rng.end; i++ {
@@ -490,29 +441,6 @@ func (a *Adapter) getRange(key string, rng blockRange) ([][]byte, error) {
 				}
 				return nil, err
 			}
-			a.blmu.Unlock(blockID)
-		}
-		return blocks, nil
-	} else if nToFetch == len(blocks) {
-		buf := make([]byte, (rng.end-rng.start+1)*a.blockSize)
-		n, err := a.srcReadAt(key, buf, rng.start*a.blockSize)
-		if err != nil && !errors.Is(err, io.EOF) {
-			for i := rng.start; i <= rng.end; i++ {
-				blockID := a.blockKey(key, i)
-				a.blmu.Unlock(blockID)
-			}
-			return nil, err
-		}
-		left := int64(n)
-		for bid := int64(0); bid <= rng.end-rng.start && left > 0; bid++ {
-			ll := min(left, a.blockSize)
-			blocks[bid] = make([]byte, ll)
-			copy(blocks[bid], buf[bid*a.blockSize:bid*a.blockSize+ll])
-			left -= ll
-			a.cache.Add(key, uint(rng.start+bid), blocks[bid])
-		}
-		for i := rng.start; i <= rng.end; i++ {
-			blockID := a.blockKey(key, i)
 			a.blmu.Unlock(blockID)
 		}
 		return blocks, nil
@@ -718,7 +646,7 @@ func (a *Adapter) getBlock(key string, id int64) ([]byte, error) {
 	blockID := a.blockKey(key, id)
 	if a.blmu.Lock(blockID) {
 		buf := make([]byte, a.blockSize)
-		n, err := a.srcReadAt(key, buf, int64(id)*int64(a.blockSize))
+		n, err := a.srcReadAt(key, buf, int64(id)*a.blockSize)
 		if err != nil && !errors.Is(err, io.EOF) {
 			a.blmu.Unlock(blockID)
 			return nil, err

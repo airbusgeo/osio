@@ -115,5 +115,5 @@ func (h *S3Handler) StreamAt(key string, off int64, n int64) (io.ReadCloser, int
 }
 
 func (h *S3Handler) ReadAt(key string, p []byte, off int64) (int, int64, error) {
-	return keyReadFull(h, key, p, off)
+	panic("deprecated (kept for retrocompatibility)")
 }
