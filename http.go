@@ -58,7 +58,7 @@ func HTTPHeader(key, value string) HTTPOption {
 
 // HTTPHandle creates a KeyReaderAt suitable for constructing an Adapter
 // that accesses objects using the http protocol
-func HTTPHandle(ctx context.Context, opts ...HTTPOption) (KeyReaderAt, error) {
+func HTTPHandle(ctx context.Context, opts ...HTTPOption) (*HTTPHandler, error) {
 	handler := &HTTPHandler{
 		ctx: ctx,
 	}
@@ -68,7 +68,7 @@ func HTTPHandle(ctx context.Context, opts ...HTTPOption) (KeyReaderAt, error) {
 	if handler.client == nil {
 		handler.client = &http.Client{}
 	}
-	return keyReaderAtWrapper{handler}, nil
+	return handler, nil
 }
 
 func handleResponse(r *http.Response) (io.ReadCloser, int64, error) {
@@ -116,4 +116,8 @@ func (h *HTTPHandler) StreamAt(key string, off int64, n int64) (io.ReadCloser, i
 		return handleResponse(r)
 	}
 	return r.Body, size, err
+}
+
+func (h *HTTPHandler) ReadAt(key string, p []byte, off int64) (int, int64, error) {
+	return keyReadFull(h, key, p, off)
 }

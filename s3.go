@@ -53,7 +53,7 @@ func S3RequestPayer() S3Option {
 
 // S3Handle creates a KeyReaderAt suitable for constructing an Adapter
 // that accesses objects on Amazon S3
-func S3Handle(ctx context.Context, opts ...S3Option) (KeyReaderAt, error) {
+func S3Handle(ctx context.Context, opts ...S3Option) (*S3Handler, error) {
 	handler := &S3Handler{
 		ctx: ctx,
 	}
@@ -67,7 +67,7 @@ func S3Handle(ctx context.Context, opts ...S3Option) (KeyReaderAt, error) {
 		}
 		handler.client = s3.NewFromConfig(cfg)
 	}
-	return keyReaderAtWrapper{handler}, nil
+	return handler, nil
 }
 
 func handleS3ApiError(err error) (io.ReadCloser, int64, error) {
@@ -112,4 +112,8 @@ func (h *S3Handler) StreamAt(key string, off int64, n int64) (io.ReadCloser, int
 		return handleS3ApiError(fmt.Errorf("new reader for s3://%s/%s: %w", bucket, object, err))
 	}
 	return r.Body, size, err
+}
+
+func (h *S3Handler) ReadAt(key string, p []byte, off int64) (int, int64, error) {
+	return keyReadFull(h, key, p, off)
 }

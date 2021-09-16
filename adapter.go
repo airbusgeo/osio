@@ -82,12 +82,8 @@ type KeyStreamerAt interface {
 	StreamAt(key string, off int64, n int64) (io.ReadCloser, int64, error)
 }
 
-type keyReaderAtWrapper struct {
-	KeyStreamerAt
-}
-
-func (w keyReaderAtWrapper) ReadAt(key string, p []byte, off int64) (int, int64, error) {
-	r, size, err := w.KeyStreamerAt.StreamAt(key, off, int64(len(p)))
+func keyReadFull(s KeyStreamerAt, key string, p []byte, off int64) (int, int64, error) {
+	r, size, err := s.StreamAt(key, off, int64(len(p)))
 	if err != nil {
 		return 0, size, err
 	}
@@ -97,6 +93,14 @@ func (w keyReaderAtWrapper) ReadAt(key string, p []byte, off int64) (int, int64,
 		err = io.EOF
 	}
 	return n, size, err
+}
+
+type keyReaderAtWrapper struct {
+	KeyStreamerAt
+}
+
+func (w keyReaderAtWrapper) ReadAt(key string, p []byte, off int64) (int, int64, error) {
+	return keyReadFull(w, key, p, off)
 }
 
 // BlockCacher is the interface that wraps block caching functionality
@@ -134,22 +138,21 @@ type Adapter struct {
 	blmu            NamedOnceMutex
 	numCachedBlocks int
 	cache           BlockCacher
-	reader          KeyReaderAt
-	canStream       bool
+	keyReader       KeyReaderAt
+	keyStreamer     KeyStreamerAt
 	splitRanges     bool
 	sizeCache       *lru.Cache
 	retries         int
 }
 
 func (a *Adapter) srcStreamAt(key string, off int64, n int64) (io.ReadCloser, error) {
-	s := a.reader.(KeyStreamerAt)
 	try := 1
 	delay := 100 * time.Millisecond
 	var r io.ReadCloser
 	var tot int64
 	var err error
 	for {
-		r, tot, err = s.StreamAt(key, off, n)
+		r, tot, err = a.keyStreamer.StreamAt(key, off, n)
 		if err != nil && try <= a.retries && errs.Temporary(err) {
 			try++
 			time.Sleep(delay)
@@ -180,7 +183,7 @@ func (a *Adapter) srcReadAt(key string, buf []byte, off int64) (int, error) {
 	var tot int64
 	var err error
 	for {
-		n, tot, err = a.reader.ReadAt(key, buf, off)
+		n, tot, err = a.keyReader.ReadAt(key, buf, off)
 		if err != nil && try <= a.retries && errs.Temporary(err) {
 			try++
 			time.Sleep(delay)
@@ -393,14 +396,25 @@ const (
 	DefaultNumCachedBlocks = 100
 )
 
-func NewAdapter(reader KeyReaderAt, opts ...AdapterOption) (*Adapter, error) {
-	_, okStream := reader.(KeyStreamerAt)
+func NewAdapter(keyReader KeyReaderAt, opts ...AdapterOption) (*Adapter, error) {
+	return newAdapter(keyReader, nil, opts...)
+}
+
+func NewStreamingAdapter(keyStreamer KeyStreamerAt, opts ...AdapterOption) (*Adapter, error) {
+	keyReader, ok := keyStreamer.(KeyReaderAt)
+	if !ok {
+		keyReader = keyReaderAtWrapper{keyStreamer}
+	}
+	return newAdapter(keyReader, keyStreamer, opts...)
+}
+
+func newAdapter(keyReader KeyReaderAt, keyStreamer KeyStreamerAt, opts ...AdapterOption) (*Adapter, error) {
 	bc := &Adapter{
 		blockSize:       DefaultBlockSize,
 		numCachedBlocks: DefaultNumCachedBlocks,
-		reader:          reader,
+		keyStreamer:     keyStreamer,
+		keyReader:       keyReader,
 		splitRanges:     false,
-		canStream:       okStream,
 		retries:         5,
 	}
 	for _, o := range opts {
@@ -445,7 +459,7 @@ func (a *Adapter) getRange(key string, rng blockRange) ([][]byte, error) {
 			nToFetch++
 		}
 	}
-	if nToFetch == len(blocks) && a.canStream {
+	if nToFetch == len(blocks) && a.keyStreamer != nil {
 		r, err := a.srcStreamAt(key, rng.start*a.blockSize, (rng.end-rng.start+1)*a.blockSize)
 		if err != nil {
 			for i := rng.start; i <= rng.end; i++ {
@@ -478,7 +492,7 @@ func (a *Adapter) getRange(key string, rng blockRange) ([][]byte, error) {
 			a.blmu.Unlock(blockID)
 		}
 		return blocks, nil
-	} else if nToFetch == len(blocks) && !a.canStream {
+	} else if nToFetch == len(blocks) {
 		buf := make([]byte, (rng.end-rng.start+1)*a.blockSize)
 		n, err := a.srcReadAt(key, buf, rng.start*a.blockSize)
 		if err != nil && !errors.Is(err, io.EOF) {

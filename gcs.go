@@ -52,7 +52,7 @@ func GCSBillingProject(projectID string) GCSOption {
 
 // GCSHandle creates a KeyReaderAt suitable for constructing an Adapter
 // that accesses objects on Google Cloud Storage
-func GCSHandle(ctx context.Context, opts ...GCSOption) (KeyReaderAt, error) {
+func GCSHandle(ctx context.Context, opts ...GCSOption) (*GCSHandler, error) {
 	handler := &GCSHandler{
 		ctx: ctx,
 	}
@@ -66,7 +66,7 @@ func GCSHandle(ctx context.Context, opts ...GCSOption) (KeyReaderAt, error) {
 		}
 		handler.client = cl
 	}
-	return keyReaderAtWrapper{handler}, nil
+	return handler, nil
 }
 
 func (gcs *GCSHandler) StreamAt(key string, off int64, n int64) (io.ReadCloser, int64, error) {
@@ -90,4 +90,8 @@ func (gcs *GCSHandler) StreamAt(key string, off int64, n int64) (io.ReadCloser, 
 		return nil, 0, fmt.Errorf("new reader for gs://%s/%s: %w", bucket, object, err)
 	}
 	return r, r.Attrs.Size, err
+}
+
+func (gcs *GCSHandler) ReadAt(key string, p []byte, off int64) (int, int64, error) {
+	return keyReadFull(gcs, key, p, off)
 }
