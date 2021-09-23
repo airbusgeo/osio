@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"sync"
 	"syscall"
@@ -79,34 +80,56 @@ var delay time.Duration
 var errOver50 = errors.New("ff50")
 var errRandom = errors.New("pseudo-random error")
 
-func (r TReader) ReadAt(key string, buf []byte, off int64) (int, int64, error) {
+func (r TReader) StreamAt(key string, off int64, n int64) (io.ReadCloser, int64, error) {
 	ll := int64(len(r.data))
 	if key == "fail_over_50" {
-		if off < 50 {
-		} else {
+		if off >= 50 {
 			time.Sleep(10 * time.Millisecond)
-			return 0, ll, errOver50
+			return nil, 0, errOver50
 		}
 	} else {
 		time.Sleep(delay)
 	}
 	if key == "enoent" {
-		return 0, ll, syscall.ENOENT
+		return nil, 0, syscall.ENOENT
 	}
 	if off < 0 {
-		return 0, ll, errors.New("negative offset")
+		return nil, 0, errors.New("negative offset")
 	}
 	if off > 1024+40 {
-		return 0, ll, errRandom
+		return nil, 0, errRandom
 	}
-	if int(off) > len(r.data) {
-		return 0, ll, io.EOF
+	if off >= ll {
+		return nil, ll, io.EOF
 	}
-	n := copy(buf, r.data[off:])
-	if n < len(buf) {
-		return n, ll, io.EOF
+	end := off + n
+	if end > ll {
+		return ioutil.NopCloser(bytes.NewReader(r.data[off:])), ll, io.EOF
 	}
-	return n, ll, nil
+	return ioutil.NopCloser(bytes.NewReader(r.data[off:end])), ll, nil
+}
+
+type EReader struct {
+	errbuf []byte
+	delay  time.Duration
+	erroff int64
+	err    error
+}
+
+func (r EReader) StreamAt(key string, off int64, n int64) (io.ReadCloser, int64, error) {
+	ll := int64(len(r.errbuf))
+	time.Sleep(r.delay)
+	if r.err != nil && off >= r.erroff {
+		return nil, 0, r.err
+	}
+	if off >= ll {
+		return nil, ll, io.EOF
+	}
+	end := off + n
+	if end > ll {
+		return ioutil.NopCloser(bytes.NewReader(r.errbuf[off:])), ll, io.EOF
+	}
+	return ioutil.NopCloser(bytes.NewReader(r.errbuf[off:end])), ll, nil
 }
 
 var rr TReader
@@ -121,6 +144,10 @@ func init() {
 	}
 	rr = TReader{data}
 }
+
+var gsp bool
+var gbs int
+var gnb int
 
 func test(t *testing.T, bc *Adapter, buf []byte, offset int64, expectedLen int, expected []byte, oneOfErr ...error) {
 	t.Helper()
@@ -139,7 +166,7 @@ func test(t *testing.T, bc *Adapter, buf []byte, offset int64, expectedLen int, 
 		t.Errorf("got %d bytes, expected %d", r, expectedLen)
 	}
 	if !bytes.Equal(buf[0:r], expected) {
-		t.Errorf("got %v, expected %v", buf[0:r], expected)
+		t.Errorf("got %v, expected %v (%v,%v,%v)", buf[0:r], expected, gsp, gbs, gnb)
 	}
 
 }
@@ -166,6 +193,9 @@ func TestBlockCache(t *testing.T) {
 }
 
 func testBlockCache(t *testing.T, split bool, blockSize int, numCachedBlocks int) {
+	gsp = split
+	gbs = blockSize
+	gnb = numCachedBlocks
 
 	cache, _ := NewLRUCache(numCachedBlocks)
 	bc, _ := NewAdapter(rr, BlockCache(cache), BlockSize(fmt.Sprintf("%d", blockSize)), SplitRanges(split))
@@ -240,10 +270,10 @@ func testBlockCache(t *testing.T, split bool, blockSize int, numCachedBlocks int
 
 	//read before and after an already cached block
 	buf = make([]byte, blockSize*4)
-	expx := make([]byte, blockSize*4)
-	exp, _, _ := rr.ReadAt("", expx, int64(blockSize*3-blockSize/2))
+	exp, _, _ := rr.StreamAt("", int64(blockSize*3-blockSize/2), int64(blockSize*4))
+	expx, _ := ioutil.ReadAll(exp)
 	_, _ = bc.ReadAt("", buf[0:blockSize], int64(blockSize*3))
-	test(t, bc, buf, int64(blockSize*3-blockSize/2), exp, expx, nil)
+	test(t, bc, buf, int64(blockSize*3-blockSize/2), len(expx), expx, nil)
 
 }
 
@@ -356,30 +386,6 @@ func TestReader(t *testing.T) {
 	assert.Equal(t, []byte{0, 0, 0, 1}, bufs[0])
 	assert.Equal(t, []byte{255, 255, 255, 255}, bufs[1])
 
-}
-
-type EReader struct {
-	errbuf []byte
-	delay  time.Duration
-	erroff int64
-	err    error
-}
-
-func (r EReader) ReadAt(key string, buf []byte, off int64) (int, int64, error) {
-	ll := int64(len(r.errbuf))
-	time.Sleep(r.delay)
-	if r.err != nil && off >= r.erroff {
-		return 0, 0, r.err
-	}
-	if int(off) > len(r.errbuf) {
-		return 0, ll, io.EOF
-	}
-	n := copy(buf, r.errbuf[off:])
-	var err error
-	if n < len(buf) {
-		err = io.EOF
-	}
-	return n, ll, err
 }
 
 //provide test coverage of reader errors in multi-block requests

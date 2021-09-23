@@ -50,7 +50,7 @@ func GCSBillingProject(projectID string) GCSOption {
 	}
 }
 
-// GCSHandle creates a KeyReaderAt suitable for constructing an Adapter
+// GCSHandle creates a KeyStreamerAt suitable for constructing an Adapter
 // that accesses objects on Google Cloud Storage
 func GCSHandle(ctx context.Context, opts ...GCSOption) (*GCSHandler, error) {
 	handler := &GCSHandler{
