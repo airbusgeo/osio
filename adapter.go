@@ -636,6 +636,24 @@ func (a *Adapter) ReadAt(key string, p []byte, off int64) (int, error) {
 	return written[0], err
 }
 
+func (a *Adapter) Size(key string) (int64, error) {
+	for {
+		si, ok := a.sizeCache.Get(key)
+		if !ok {
+			_, err := a.ReadAt(key, []byte{0}, 0) //ignore errors as we just want to populate the size cache
+			if err != nil {
+				return -1, err
+			}
+			continue
+		}
+		si64 := si.(int64)
+		if si64 == -1 {
+			return -1, syscall.ENOENT
+		}
+		return si64, nil
+	}
+}
+
 func (a *Adapter) blockKey(key string, id int64) string {
 	return fmt.Sprintf("%s-%d", key, id)
 }
