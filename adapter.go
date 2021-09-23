@@ -741,26 +741,14 @@ func (r *Reader) Size() int64 {
 }
 
 func (a *Adapter) Reader(key string) (*Reader, error) {
-	si, ok := a.sizeCache.Get(key)
-	var err error
-	if !ok {
-		_, err = a.ReadAt(key, []byte{0}, 0) //ignore errors as we just want to populate the size cache
-		si, ok = a.sizeCache.Get(key)
+	size, err := a.Size(key)
+	if err != nil {
+		return nil, err
 	}
-	if ok {
-		size := si.(int64)
-		if size == -1 {
-			return nil, syscall.ENOENT
-		}
-		return &Reader{
-			a:    a,
-			key:  key,
-			size: size,
-			off:  0,
-		}, nil
-	}
-	if err == nil {
-		err = fmt.Errorf("BUG: size cache miss")
-	}
-	return nil, err
+	return &Reader{
+		a:    a,
+		key:  key,
+		size: size,
+		off:  0,
+	}, nil
 }

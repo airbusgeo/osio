@@ -282,6 +282,8 @@ func TestReader(t *testing.T) {
 	bc, _ := NewAdapter(rr)
 	_, err := bc.Reader("enoent")
 	assert.ErrorIs(t, err, syscall.ENOENT)
+	_, err = bc.Reader("enoent") //from size cache
+	assert.ErrorIs(t, err, syscall.ENOENT)
 	bc, _ = NewAdapter(rr, BlockSize("2k"))
 	r, err := bc.Reader("")
 	assert.NoError(t, err)
