@@ -15,11 +15,9 @@
 package osio
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"sort"
 	"strconv"
@@ -32,18 +30,6 @@ import (
 	"github.com/airbusgeo/errs"
 	lru "github.com/hashicorp/golang-lru"
 )
-
-// KeyReaderAt is the interface that wraps the basic ReadAt method for the specified key.
-//
-// Deprecated: Use KeyStreamerAt instead.
-type KeyReaderAt interface {
-	// ReadAt reads len(p) bytes from the resource identified by key into p
-	// starting at offset off. It returns the number of bytes read (0 <= n <= len(p)) and
-	// any error encountered.
-	//
-	// Deprecated: Use StreamAt instead.
-	ReadAt(key string, p []byte, off int64) (int, int64, error)
-}
 
 // KeyStreamerAt is the second interface a handler can implement.
 //
@@ -70,19 +56,6 @@ type KeyStreamerAt interface {
 	//
 	// The caller of StreamAt is responsible for closing the stream.
 	StreamAt(key string, off int64, n int64) (io.ReadCloser, int64, error)
-}
-
-type readerAtToStreamerAtWrapper struct {
-	KeyReaderAt
-}
-
-func (w readerAtToStreamerAtWrapper) StreamAt(key string, off int64, tot int64) (io.ReadCloser, int64, error) {
-	p := make([]byte, tot)
-	n, size, err := w.ReadAt(key, p, off)
-	if err == io.EOF {
-		err = nil
-	}
-	return ioutil.NopCloser(bytes.NewReader(p[:n])), size, err
 }
 
 // BlockCacher is the interface that wraps block caching functionality
@@ -148,6 +121,9 @@ func (a *Adapter) srcStreamAt(key string, off int64, n int64) (io.ReadCloser, er
 			if errors.Is(err, syscall.ENOENT) {
 				a.sizeCache.Add(key, int64(-1))
 			}
+			if errors.Is(err, io.EOF) {
+				a.sizeCache.Add(key, tot)
+			}
 		} else {
 			a.sizeCache.Add(key, tot)
 		}
@@ -157,7 +133,7 @@ func (a *Adapter) srcStreamAt(key string, off int64, n int64) (io.ReadCloser, er
 
 func (a *Adapter) srcReadAt(key string, p []byte, off int64) (int, error) {
 	r, err := a.srcStreamAt(key, off, int64(len(p)))
-	if err != nil {
+	if err != nil && (r == nil || !errors.Is(err, io.EOF)) {
 		return 0, err
 	}
 	defer r.Close()
@@ -353,24 +329,11 @@ const (
 	DefaultNumCachedBlocks = 100
 )
 
-// NewAdapter creates a caching adapter around the provided KeyReaderAt.
-//
-// NewAdapter will only return an error if you do not provide plausible options
-// (e.g. negative number of blocks or sizes, nil caches, etc...)
-//
-// Deprecated: use NewStreamingAdapter instead.
-func NewAdapter(keyReader KeyReaderAt, opts ...AdapterOption) (*Adapter, error) {
-	if sa, ok := keyReader.(KeyStreamerAt); ok {
-		return NewStreamingAdapter(sa, opts...)
-	}
-	return NewStreamingAdapter(readerAtToStreamerAtWrapper{keyReader}, opts...)
-}
-
 // NewStreamingAdapter creates a caching adapter around the provided KeyStreamerAt.
 //
 // NewStreamingAdapter will only return an error if you do not provide plausible options
 // (e.g. negative number of blocks or sizes, nil caches, etc...)
-func NewStreamingAdapter(keyStreamer KeyStreamerAt, opts ...AdapterOption) (*Adapter, error) {
+func NewAdapter(keyStreamer KeyStreamerAt, opts ...AdapterOption) (*Adapter, error) {
 	bc := &Adapter{
 		blockSize:       DefaultBlockSize,
 		numCachedBlocks: DefaultNumCachedBlocks,
@@ -415,7 +378,7 @@ func (a *Adapter) getRange(key string, rng blockRange) ([][]byte, error) {
 	}
 	if nToFetch == len(blocks) {
 		r, err := a.srcStreamAt(key, rng.start*a.blockSize, (rng.end-rng.start+1)*a.blockSize)
-		if err != nil {
+		if err != nil && (r == nil || !errors.Is(err, io.EOF)) {
 			for i := rng.start; i <= rng.end; i++ {
 				blockID := a.blockKey(key, i)
 				a.blmu.Unlock(blockID)
@@ -636,6 +599,26 @@ func (a *Adapter) ReadAt(key string, p []byte, off int64) (int, error) {
 	return written[0], err
 }
 
+func (a *Adapter) Size(key string) (int64, error) {
+	si, ok := a.sizeCache.Get(key)
+	var err error
+	if !ok {
+		_, err = a.ReadAt(key, []byte{0}, 0) //ignore errors as we just want to populate the size cache
+		si, ok = a.sizeCache.Get(key)
+	}
+	if ok {
+		size := si.(int64)
+		if size == -1 {
+			return -1, syscall.ENOENT
+		}
+		return size, nil
+	}
+	if err == nil {
+		err = fmt.Errorf("BUG: size cache miss")
+	}
+	return -1, err
+}
+
 func (a *Adapter) blockKey(key string, id int64) string {
 	return fmt.Sprintf("%s-%d", key, id)
 }
@@ -723,26 +706,14 @@ func (r *Reader) Size() int64 {
 }
 
 func (a *Adapter) Reader(key string) (*Reader, error) {
-	si, ok := a.sizeCache.Get(key)
-	var err error
-	if !ok {
-		_, err = a.ReadAt(key, []byte{0}, 0) //ignore errors as we just want to populate the size cache
-		si, ok = a.sizeCache.Get(key)
+	size, err := a.Size(key)
+	if err != nil {
+		return nil, err
 	}
-	if ok {
-		size := si.(int64)
-		if size == -1 {
-			return nil, syscall.ENOENT
-		}
-		return &Reader{
-			a:    a,
-			key:  key,
-			size: size,
-			off:  0,
-		}, nil
-	}
-	if err == nil {
-		err = fmt.Errorf("BUG: size cache miss")
-	}
-	return nil, err
+	return &Reader{
+		a:    a,
+		key:  key,
+		size: size,
+		off:  0,
+	}, nil
 }
