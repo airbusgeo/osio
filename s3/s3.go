@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package osio
+package s3
 
 import (
 	"context"
@@ -21,6 +21,7 @@ import (
 	"io"
 	"syscall"
 
+	"github.com/airbusgeo/osio/internal"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -82,9 +83,9 @@ func handleS3ApiError(err error) (io.ReadCloser, int64, error) {
 }
 
 func (h *S3Handler) StreamAt(key string, off int64, n int64) (io.ReadCloser, int64, error) {
-	bucket, object := osuriparse("s3", key)
-	if len(bucket) == 0 || len(object) == 0 {
-		return nil, 0, fmt.Errorf("invalid key")
+	bucket, object, err := internal.BucketObject(key)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	// HEAD request to get object size as it is not returned in range requests

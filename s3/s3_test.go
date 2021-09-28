@@ -12,25 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package osio
+package s3
 
 import (
 	"context"
 	"syscall"
 	"testing"
 
-	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/airbusgeo/osio"
+	aws3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestS3(t *testing.T) {
 	ctx := context.Background()
-	s3cl := s3.New(s3.Options{
+	s3cl := aws3.New(aws3.Options{
 		Region:      "us-west-2",
 		Credentials: nil,
 	})
 	sss, _ := S3Handle(ctx, S3Client(s3cl))
-	s3a, _ := NewAdapter(sss)
+	s3a, _ := osio.NewAdapter(sss)
 
 	// bucket not found
 	_, err := s3a.Reader("s3://ukn-bucket/gdd/doesnotexist.tif")

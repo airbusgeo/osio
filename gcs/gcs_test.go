@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package osio
+package gcs
 
 import (
 	"context"
@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"cloud.google.com/go/storage"
+	"github.com/airbusgeo/osio"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/api/option"
 )
@@ -28,7 +29,7 @@ func TestGCS(t *testing.T) {
 	ctx := context.Background()
 	stcl, _ := storage.NewClient(ctx, option.WithoutAuthentication())
 	gcs, _ := GCSHandle(ctx, GCSClient(stcl))
-	gcsa, _ := NewAdapter(gcs)
+	gcsa, _ := osio.NewAdapter(gcs)
 	_, err := gcsa.Reader("gs://godal-ci-data-public/gdd/doesnotexist.tif")
 	assert.Equal(t, err, syscall.ENOENT)
 	r, err := gcsa.Reader("gs://godal-ci-data-public/test.tif")

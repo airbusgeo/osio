@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package osio
+package gcs
 
 import (
 	"context"
@@ -22,6 +22,7 @@ import (
 	"syscall"
 
 	"cloud.google.com/go/storage"
+	"github.com/airbusgeo/osio/internal"
 	"google.golang.org/api/googleapi"
 )
 
@@ -70,9 +71,9 @@ func GCSHandle(ctx context.Context, opts ...GCSOption) (*GCSHandler, error) {
 }
 
 func (gcs *GCSHandler) StreamAt(key string, off int64, n int64) (io.ReadCloser, int64, error) {
-	bucket, object := osuriparse("gs", key)
-	if len(bucket) == 0 || len(object) == 0 {
-		return nil, 0, fmt.Errorf("invalid key")
+	bucket, object, err := internal.BucketObject(key)
+	if err != nil {
+		return nil, 0, err
 	}
 	gbucket := gcs.client.Bucket(bucket)
 	if gcs.billingProjectID != "" {
