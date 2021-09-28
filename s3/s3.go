@@ -29,33 +29,33 @@ import (
 	"github.com/aws/smithy-go"
 )
 
-type S3Handler struct {
+type Handler struct {
 	ctx          context.Context
 	client       *s3.Client
 	requestPayer string
 }
 
 // S3Option is an option that can be passed to RegisterHandler
-type S3Option func(o *S3Handler)
+type S3Option func(o *Handler)
 
 // S3Client sets the s3.Client that will be used by the handler
 func S3Client(cl *s3.Client) S3Option {
-	return func(o *S3Handler) {
+	return func(o *Handler) {
 		o.client = cl
 	}
 }
 
 // S3RequestPayer bills the requester for the request
 func S3RequestPayer() S3Option {
-	return func(o *S3Handler) {
+	return func(o *Handler) {
 		o.requestPayer = "requester"
 	}
 }
 
-// S3Handle creates a KeyReaderAt suitable for constructing an Adapter
+// Handle creates a KeyReaderAt suitable for constructing an Adapter
 // that accesses objects on Amazon S3
-func S3Handle(ctx context.Context, opts ...S3Option) (*S3Handler, error) {
-	handler := &S3Handler{
+func Handle(ctx context.Context, opts ...S3Option) (*Handler, error) {
+	handler := &Handler{
 		ctx: ctx,
 	}
 	for _, o := range opts {
@@ -82,7 +82,7 @@ func handleS3ApiError(err error) (io.ReadCloser, int64, error) {
 	return nil, 0, err
 }
 
-func (h *S3Handler) StreamAt(key string, off int64, n int64) (io.ReadCloser, int64, error) {
+func (h *Handler) StreamAt(key string, off int64, n int64) (io.ReadCloser, int64, error) {
 	bucket, object, err := internal.BucketObject(key)
 	if err != nil {
 		return nil, 0, err
@@ -115,6 +115,6 @@ func (h *S3Handler) StreamAt(key string, off int64, n int64) (io.ReadCloser, int
 	return r.Body, size, err
 }
 
-func (h *S3Handler) ReadAt(key string, p []byte, off int64) (int, int64, error) {
+func (h *Handler) ReadAt(key string, p []byte, off int64) (int, int64, error) {
 	panic("deprecated (kept for retrocompatibility)")
 }

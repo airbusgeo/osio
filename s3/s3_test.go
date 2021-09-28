@@ -30,7 +30,7 @@ func TestS3(t *testing.T) {
 		Region:      "us-west-2",
 		Credentials: nil,
 	})
-	sss, _ := S3Handle(ctx, S3Client(s3cl))
+	sss, _ := Handle(ctx, S3Client(s3cl))
 	s3a, _ := osio.NewAdapter(sss)
 
 	// bucket not found

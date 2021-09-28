@@ -28,7 +28,7 @@ import (
 func TestGCS(t *testing.T) {
 	ctx := context.Background()
 	stcl, _ := storage.NewClient(ctx, option.WithoutAuthentication())
-	gcs, _ := GCSHandle(ctx, GCSClient(stcl))
+	gcs, _ := Handle(ctx, GCSClient(stcl))
 	gcsa, _ := osio.NewAdapter(gcs)
 	_, err := gcsa.Reader("gs://godal-ci-data-public/gdd/doesnotexist.tif")
 	assert.Equal(t, err, syscall.ENOENT)

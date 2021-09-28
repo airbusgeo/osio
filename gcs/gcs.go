@@ -27,19 +27,19 @@ import (
 	"google.golang.org/api/googleapi"
 )
 
-type GCSHandler struct {
+type Handler struct {
 	ctx              context.Context
 	client           *storage.Client
 	billingProjectID string
 }
 
 //Option is an option that can be passed to RegisterHandler
-type GCSOption func(o *GCSHandler)
+type GCSOption func(o *Handler)
 
 // Client sets the cloud.google.com/go/storage.Client that will be used
 // by the handler
 func GCSClient(cl *storage.Client) GCSOption {
-	return func(o *GCSHandler) {
+	return func(o *Handler) {
 		o.client = cl
 	}
 }
@@ -47,15 +47,15 @@ func GCSClient(cl *storage.Client) GCSOption {
 // BillingProject sets the project name which should be billed for the requests.
 // This is mandatory if the bucket is in requester-pays mode.
 func GCSBillingProject(projectID string) GCSOption {
-	return func(o *GCSHandler) {
+	return func(o *Handler) {
 		o.billingProjectID = projectID
 	}
 }
 
-// GCSHandle creates a KeyStreamerAt suitable for constructing an Adapter
+// Handle creates a KeyStreamerAt suitable for constructing an Adapter
 // that accesses objects on Google Cloud Storage
-func GCSHandle(ctx context.Context, opts ...GCSOption) (*GCSHandler, error) {
-	handler := &GCSHandler{
+func Handle(ctx context.Context, opts ...GCSOption) (*Handler, error) {
+	handler := &Handler{
 		ctx: ctx,
 	}
 	for _, o := range opts {
@@ -90,7 +90,7 @@ func (r readWrapper) Close() error {
 	return nil
 }
 
-func (gcs *GCSHandler) StreamAt(key string, off int64, n int64) (io.ReadCloser, int64, error) {
+func (gcs *Handler) StreamAt(key string, off int64, n int64) (io.ReadCloser, int64, error) {
 	bucket, object, err := internal.BucketObject(key)
 	if err != nil {
 		return nil, 0, err
@@ -114,6 +114,6 @@ func (gcs *GCSHandler) StreamAt(key string, off int64, n int64) (io.ReadCloser, 
 	return readWrapper{r}, r.Attrs.Size, nil
 }
 
-func (gcs *GCSHandler) ReadAt(key string, p []byte, off int64) (int, int64, error) {
+func (gcs *Handler) ReadAt(key string, p []byte, off int64) (int, int64, error) {
 	panic("deprecated (kept for retrocompatibility)")
 }
