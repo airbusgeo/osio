@@ -22,6 +22,7 @@ import (
 	"syscall"
 
 	"cloud.google.com/go/storage"
+	"github.com/airbusgeo/errs"
 	"github.com/airbusgeo/osio/internal"
 	"google.golang.org/api/googleapi"
 )
@@ -70,6 +71,25 @@ func GCSHandle(ctx context.Context, opts ...GCSOption) (*GCSHandler, error) {
 	return handler, nil
 }
 
+type readWrapper struct {
+	io.ReadCloser
+}
+
+func (r readWrapper) Read(buf []byte) (int, error) {
+	n, err := r.ReadCloser.Read(buf)
+	if err != nil {
+		return n, errs.AddTemporaryCheck(err)
+	}
+	return n, nil
+}
+func (r readWrapper) Close() error {
+	err := r.ReadCloser.Close()
+	if err != nil {
+		return errs.AddTemporaryCheck(err)
+	}
+	return nil
+}
+
 func (gcs *GCSHandler) StreamAt(key string, off int64, n int64) (io.ReadCloser, int64, error) {
 	bucket, object, err := internal.BucketObject(key)
 	if err != nil {
@@ -88,9 +108,10 @@ func (gcs *GCSHandler) StreamAt(key string, off int64, n int64) (io.ReadCloser, 
 		if errors.Is(err, storage.ErrObjectNotExist) || errors.Is(err, storage.ErrBucketNotExist) {
 			return nil, -1, syscall.ENOENT
 		}
+		err = errs.AddTemporaryCheck(err)
 		return nil, 0, fmt.Errorf("new reader for gs://%s/%s: %w", bucket, object, err)
 	}
-	return r, r.Attrs.Size, err
+	return readWrapper{r}, r.Attrs.Size, nil
 }
 
 func (gcs *GCSHandler) ReadAt(key string, p []byte, off int64) (int, int64, error) {

@@ -27,7 +27,6 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/airbusgeo/errs"
 	lru "github.com/hashicorp/golang-lru"
 )
 
@@ -100,6 +99,16 @@ type Adapter struct {
 	retries         int
 }
 
+func temporary(err error) bool {
+	type temp interface {
+		Temporary() bool
+	}
+	if tt, ok := err.(temp); ok {
+		return tt.Temporary()
+	}
+	return false
+}
+
 func (a *Adapter) srcStreamAt(key string, off int64, n int64) (io.ReadCloser, error) {
 	try := 1
 	delay := 100 * time.Millisecond
@@ -108,7 +117,7 @@ func (a *Adapter) srcStreamAt(key string, off int64, n int64) (io.ReadCloser, er
 	var err error
 	for {
 		r, tot, err = a.keyStreamer.StreamAt(key, off, n)
-		if err != nil && try <= a.retries && errs.Temporary(err) {
+		if err != nil && try <= a.retries && temporary(err) {
 			try++
 			time.Sleep(delay)
 			delay *= 2
