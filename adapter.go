@@ -147,7 +147,7 @@ func (a *Adapter) srcReadAt(key string, p []byte, off int64) (int, error) {
 	}
 	defer r.Close()
 	n, err := io.ReadFull(r, p)
-	if err == io.ErrUnexpectedEOF {
+	if errors.Is(err, io.ErrUnexpectedEOF) {
 		err = io.EOF
 	}
 	return n, err
@@ -399,10 +399,10 @@ func (a *Adapter) getRange(key string, rng blockRange) ([][]byte, error) {
 			blockID := a.blockKey(key, bid+rng.start)
 			buf := make([]byte, a.blockSize)
 			n, err := io.ReadFull(r, buf)
-			if err == io.ErrUnexpectedEOF {
+			if errors.Is(err, io.ErrUnexpectedEOF) {
 				err = io.EOF
 			}
-			if err == nil || err == io.EOF {
+			if err == nil || errors.Is(err, io.EOF) {
 				blocks[bid] = buf[:n]
 				a.cache.Add(key, uint(rng.start+bid), blocks[bid])
 			}
@@ -410,7 +410,7 @@ func (a *Adapter) getRange(key string, rng blockRange) ([][]byte, error) {
 				for i := rng.start + bid; i <= rng.end; i++ {
 					a.blmu.Unlock(a.blockKey(key, i))
 				}
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
 					break
 				}
 				return nil, err

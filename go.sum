@@ -44,8 +44,8 @@ cloud.google.com/go/storage v1.15.0/go.mod h1:mjjQMoxxyGH7Jr8K5qrx6N2O0AHsczI61s
 dmitri.shuralyov.com/gpu/mtl v0.0.0-20190408044501-666a987793e9/go.mod h1:H6x//7gZCb22OMCxBHrMx7a5I7Hp++hsVxbQ4BYO7hU=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
-github.com/airbusgeo/errs v0.0.1 h1:hjL818syZV6a9Dv5rP2to6GH61l4buDrFIwfbOn297E=
-github.com/airbusgeo/errs v0.0.1/go.mod h1:w6O7kns8m5o+eQeWsbhU7usUNq2Rhmt4xQO+rVt9/Js=
+github.com/airbusgeo/errs v0.0.2 h1:+7i9HLCgs8xWkGN7cIUMStVUA1d6F5AqpAlft6O4kM8=
+github.com/airbusgeo/errs v0.0.2/go.mod h1:w6O7kns8m5o+eQeWsbhU7usUNq2Rhmt4xQO+rVt9/Js=
 github.com/antihax/optional v1.0.0/go.mod h1:uupD/76wgC+ih3iEmQUL+0Ugr19nfwCT1kdvxnR2qWY=
 github.com/aws/aws-sdk-go-v2 v1.7.0 h1:UYGnoIPIzed+ycmgw8Snb/0HK+KlMD+SndLTneG8ncE=
 github.com/aws/aws-sdk-go-v2 v1.7.0/go.mod h1:tb9wi5s61kTDA5qCkcDbt3KRVV74GGslQkl/DRdX/P4=
