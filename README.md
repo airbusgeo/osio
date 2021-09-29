@@ -33,14 +33,18 @@ The following example shows how to extract a single file from a (large) zip arch
 Google Cloud Storage bucket.
 
 ```go
+import(
+    "github.com/airbusgeo/osio"
+    "github.com/airbusgeo/osio/gcs"
+)
 func ExampleGSHandle_zip() {
     ctx := context.Background()
-    gcsr, err := osio.GCSHandle(ctx)
+    gcsr, err := gcs.Handle(ctx)
     /* handle error, typically if credentials could not be found, network down ,etc... */
-    gcs, _ = osio.NewAdapter(gcsr)
+    gcsa, _ = osio.NewAdapter(gcsr)
 
     file := "gs://bucket/path/to/large/archive.zip"
-    obj, err := gcs.Reader(file)
+    obj, err := gcsa.Reader(file)
     if err != nil {
         return fmt.Errorf("open %s: %w", file, err)
     }
@@ -66,8 +70,13 @@ func ExampleGSHandle_zip() {
 
 
 ```go
-func WithS3Region(region string) func(opts *s3.Options) {
-	return func(opts *s3.Options) {
+import(
+    aws3 "github.com/aws/aws-sdk-go-v2/service/s3"
+    "github.com/airbusgeo/osio"
+    "github.com/airbusgeo/osio/s3"
+)
+func WithS3Region(region string) func(opts *aws3.Options) {
+	return func(opts *aws3.Options) {
 		opts.Region = region
 	}
 }
@@ -76,8 +85,8 @@ func ExampleS3Handle_zip() {
 	ctx := context.Background()
 
 	cfg, _ := config.LoadDefaultConfig(ctx)
-	s3cl := s3.NewFromConfig(cfg, WithS3Region("eu-central-1"))
-	s3r, _ := osio.S3Handle(ctx, osio.S3Client(s3cl), osio.S3RequestPayer())
+	s3cl := aws3.NewFromConfig(cfg, WithS3Region("eu-central-1"))
+	s3r, _ := s3.Handle(ctx, osio.S3Client(s3cl), osio.S3RequestPayer())
 	osr, _ := osio.NewAdapter(s3r)
 
 	uri := "s3://sentinel-s2-l1c-zips/S2A_MSIL1C_20210630T074611_N0300_R135_T48XWN_20210630T082841.zip"
@@ -103,7 +112,7 @@ when accessing file formats that are object-storage friendly, e.g. [cogeotiffs](
 
 ```go
 ctx := context.Background()
-gcsr, err := osio.GCSHandle(ctx)
+gcsr, err := gcs.Handle(ctx)
 gcs, _ = osio.NewAdapter(gcsr)
 godal.RegisterVSIAdapter("gs://", gcs)
 dataset,err := godal.Open("gs://bucket/path/to/cog.tif")

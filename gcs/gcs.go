@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package osio
+package gcs
 
 import (
 	"context"
@@ -22,22 +22,24 @@ import (
 	"syscall"
 
 	"cloud.google.com/go/storage"
+	"github.com/airbusgeo/errs"
+	"github.com/airbusgeo/osio/internal"
 	"google.golang.org/api/googleapi"
 )
 
-type GCSHandler struct {
+type Handler struct {
 	ctx              context.Context
 	client           *storage.Client
 	billingProjectID string
 }
 
 //Option is an option that can be passed to RegisterHandler
-type GCSOption func(o *GCSHandler)
+type GCSOption func(o *Handler)
 
 // Client sets the cloud.google.com/go/storage.Client that will be used
 // by the handler
 func GCSClient(cl *storage.Client) GCSOption {
-	return func(o *GCSHandler) {
+	return func(o *Handler) {
 		o.client = cl
 	}
 }
@@ -45,15 +47,15 @@ func GCSClient(cl *storage.Client) GCSOption {
 // BillingProject sets the project name which should be billed for the requests.
 // This is mandatory if the bucket is in requester-pays mode.
 func GCSBillingProject(projectID string) GCSOption {
-	return func(o *GCSHandler) {
+	return func(o *Handler) {
 		o.billingProjectID = projectID
 	}
 }
 
-// GCSHandle creates a KeyStreamerAt suitable for constructing an Adapter
+// Handle creates a KeyStreamerAt suitable for constructing an Adapter
 // that accesses objects on Google Cloud Storage
-func GCSHandle(ctx context.Context, opts ...GCSOption) (*GCSHandler, error) {
-	handler := &GCSHandler{
+func Handle(ctx context.Context, opts ...GCSOption) (*Handler, error) {
+	handler := &Handler{
 		ctx: ctx,
 	}
 	for _, o := range opts {
@@ -69,10 +71,29 @@ func GCSHandle(ctx context.Context, opts ...GCSOption) (*GCSHandler, error) {
 	return handler, nil
 }
 
-func (gcs *GCSHandler) StreamAt(key string, off int64, n int64) (io.ReadCloser, int64, error) {
-	bucket, object := osuriparse("gs", key)
-	if len(bucket) == 0 || len(object) == 0 {
-		return nil, 0, fmt.Errorf("invalid key")
+type readWrapper struct {
+	io.ReadCloser
+}
+
+func (r readWrapper) Read(buf []byte) (int, error) {
+	n, err := r.ReadCloser.Read(buf)
+	if err != nil {
+		return n, errs.AddTemporaryCheck(err)
+	}
+	return n, nil
+}
+func (r readWrapper) Close() error {
+	err := r.ReadCloser.Close()
+	if err != nil {
+		return errs.AddTemporaryCheck(err)
+	}
+	return nil
+}
+
+func (gcs *Handler) StreamAt(key string, off int64, n int64) (io.ReadCloser, int64, error) {
+	bucket, object, err := internal.BucketObject(key)
+	if err != nil {
+		return nil, 0, err
 	}
 	gbucket := gcs.client.Bucket(bucket)
 	if gcs.billingProjectID != "" {
@@ -87,11 +108,12 @@ func (gcs *GCSHandler) StreamAt(key string, off int64, n int64) (io.ReadCloser, 
 		if errors.Is(err, storage.ErrObjectNotExist) || errors.Is(err, storage.ErrBucketNotExist) {
 			return nil, -1, syscall.ENOENT
 		}
+		err = errs.AddTemporaryCheck(err)
 		return nil, 0, fmt.Errorf("new reader for gs://%s/%s: %w", bucket, object, err)
 	}
-	return r, r.Attrs.Size, err
+	return readWrapper{r}, r.Attrs.Size, nil
 }
 
-func (gcs *GCSHandler) ReadAt(key string, p []byte, off int64) (int, int64, error) {
+func (gcs *Handler) ReadAt(key string, p []byte, off int64) (int, int64, error) {
 	panic("deprecated (kept for retrocompatibility)")
 }
