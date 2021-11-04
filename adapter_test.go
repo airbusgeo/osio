@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"sync"
 	"syscall"
@@ -438,4 +439,30 @@ func TestRangeErrors(t *testing.T) {
 		assert.Equal(t, "foo", err.Error())
 	}()
 	wg.Wait()
+}
+
+type logger struct {
+	last string
+}
+
+func (l *logger) Log(key string, off, len int64) {
+	l.last = fmt.Sprintf("%s: %d-%d", key, off, len)
+}
+func TestLogging(t *testing.T) {
+	ll := &logger{}
+	bc, _ := NewAdapter(rr, WithLogger(ll))
+	r, _ := bc.Reader("thekey")
+	buf := make([]byte, 4)
+	_, _ = r.Read(buf)
+	assert.Equal(t, "thekey: 0-131072", ll.last)
+
+	var lbuf bytes.Buffer
+	log.SetOutput(&lbuf)
+	defer func() {
+		log.SetOutput(os.Stderr)
+	}()
+	bc, _ = NewAdapter(rr, WithLogger(StdLogger))
+	r, _ = bc.Reader("thekey")
+	_, _ = r.Read(buf)
+	assert.Contains(t, lbuf.String(), "GET thekey off=0 len=131072")
 }
