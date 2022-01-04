@@ -22,9 +22,13 @@ import (
 	"syscall"
 )
 
+type Client interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
 type HTTPHandler struct {
 	ctx                context.Context
-	client             *http.Client
+	client             Client
 	requestMiddlewares []func(*http.Request)
 }
 
