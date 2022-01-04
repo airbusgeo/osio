@@ -89,8 +89,7 @@ func (h *HTTPHandler) StreamAt(key string, off int64, n int64) (io.ReadCloser, i
 	// HEAD request to get object size as it is not returned in range requests
 	var size int64
 	if off == 0 {
-		req, _ := http.NewRequest("HEAD", key, nil)
-		req = req.WithContext(h.ctx)
+		req, _ := http.NewRequestWithContext(h.ctx, "HEAD", key, nil)
 		for _, mw := range h.requestMiddlewares {
 			mw(req)
 		}
@@ -106,8 +105,7 @@ func (h *HTTPHandler) StreamAt(key string, off int64, n int64) (io.ReadCloser, i
 	}
 
 	// GET request to fetch range
-	req, _ := http.NewRequest("GET", key, nil)
-	req = req.WithContext(h.ctx)
+	req, _ := http.NewRequestWithContext(h.ctx, "GET", key, nil)
 	for _, mw := range h.requestMiddlewares {
 		mw(req)
 	}
