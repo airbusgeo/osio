@@ -36,7 +36,7 @@ type HTTPHandler struct {
 type HTTPOption func(o *HTTPHandler)
 
 // HTTPClient sets the http.Client that will be used by the handler
-func HTTPClient(cl *http.Client) HTTPOption {
+func HTTPClient(cl Client) HTTPOption {
 	return func(o *HTTPHandler) {
 		o.client = cl
 	}
