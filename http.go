@@ -75,35 +75,55 @@ func HTTPHandle(ctx context.Context, opts ...HTTPOption) (*HTTPHandler, error) {
 	return handler, nil
 }
 
-func handleResponse(r *http.Response) (io.ReadCloser, int64, error) {
+func handleResponse(r *http.Response) (int64, error) {
 	if r.StatusCode == 404 {
-		return nil, -1, syscall.ENOENT
+		return -1, syscall.ENOENT
 	}
 	if r.StatusCode == 416 {
-		return nil, 0, io.EOF
+		return 0, io.EOF
 	}
-	return nil, 0, fmt.Errorf("new reader for %s: status code %d", r.Request.URL.String(), r.StatusCode)
+	return 0, fmt.Errorf("reader for %s: status code %d", r.Request.URL.String(), r.StatusCode)
+}
+
+func (h *HTTPHandler) keySize(key string) (int64, error) {
+	req, _ := http.NewRequestWithContext(h.ctx, "HEAD", key, nil)
+	for _, mw := range h.requestMiddlewares {
+		mw(req)
+	}
+	r, err := h.client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("reader for %s: %w", key, err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode == 200 {
+		return r.ContentLength, nil
+	}
+	if r.StatusCode != 403 && r.StatusCode != 405 {
+		return handleResponse(r)
+	}
+	// retry with get
+	req.Method = "GET"
+	r, err = h.client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("reader for %s: %w", key, err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode == 200 {
+		return r.ContentLength, nil
+	}
+	return handleResponse(r)
 }
 
 func (h *HTTPHandler) StreamAt(key string, off int64, n int64) (io.ReadCloser, int64, error) {
 	// HEAD request to get object size as it is not returned in range requests
 	var size int64
+	var err error
 	if off == 0 {
-		req, _ := http.NewRequestWithContext(h.ctx, "HEAD", key, nil)
-		for _, mw := range h.requestMiddlewares {
-			mw(req)
-		}
-		r, err := h.client.Do(req)
+		size, err = h.keySize(key)
 		if err != nil {
-			return nil, 0, fmt.Errorf("new reader for %s: %w", key, err)
+			return nil, size, err
 		}
-		defer r.Body.Close()
-		if r.StatusCode != 200 {
-			return handleResponse(r)
-		}
-		size = r.ContentLength
 	}
-
 	// GET request to fetch range
 	req, _ := http.NewRequestWithContext(h.ctx, "GET", key, nil)
 	for _, mw := range h.requestMiddlewares {
@@ -112,10 +132,11 @@ func (h *HTTPHandler) StreamAt(key string, off int64, n int64) (io.ReadCloser, i
 	req.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", off, off+n-1))
 	r, err := h.client.Do(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("new reader for %s: %w", key, err)
+		return nil, 0, fmt.Errorf("reader for %s: %w", key, err)
 	}
 	if r.StatusCode != 200 && r.StatusCode != 206 {
-		return handleResponse(r)
+		size, err = handleResponse(r)
+		return nil, size, err
 	}
 	return r.Body, size, err
 }
