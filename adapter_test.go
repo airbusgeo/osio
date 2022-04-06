@@ -466,3 +466,12 @@ func TestLogging(t *testing.T) {
 	_, _ = r.Read(buf)
 	assert.Contains(t, lbuf.String(), "GET thekey off=0 len=131072")
 }
+
+func TestSizeCacheEviction(t *testing.T) {
+	bc, _ := NewAdapter(rr, SizeCache(1))
+	_, err := bc.Size("thekey")
+	assert.NoError(t, err)
+	_, _ = bc.Size("enoent")
+	_, err = bc.Size("thekey")
+	assert.NoError(t, err)
+}
