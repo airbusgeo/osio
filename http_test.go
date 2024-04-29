@@ -15,12 +15,33 @@
 package osio
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"io/ioutil"
+	"net/http"
 	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+type httpmock struct {
+	*http.Client
+	ok *bool
+}
+
+func (m httpmock) Do(req *http.Request) (*http.Response, error) {
+	fmt.Println(req)
+	if req.Method == "HEAD" {
+		*m.ok = true
+		return &http.Response{
+			StatusCode: http.StatusMethodNotAllowed,
+			Body:       ioutil.NopCloser(&bytes.Buffer{}),
+		}, nil
+	}
+	return m.Client.Do(req)
+}
 
 func TestHTTP(t *testing.T) {
 	ctx := context.Background()
@@ -28,7 +49,7 @@ func TestHTTP(t *testing.T) {
 	httpa, _ := NewAdapter(hh)
 
 	// bucket not found
-	_, err := httpa.Reader("https://storage.googleapis.com/godal-ci-data-public/doesnotexist.tif")
+	_, err := httpa.Reader("https://storage.googleapis.com/godal-ci-data-public-notexists/test.tif")
 	assert.Equal(t, err, syscall.ENOENT)
 
 	// object not found
@@ -39,7 +60,13 @@ func TestHTTP(t *testing.T) {
 	r, err := httpa.Reader("https://storage.googleapis.com/godal-ci-data-public/test.tif")
 	assert.NoError(t, err)
 	assert.Equal(t, int64(212), r.Size())
+
+	// check fallback
+	var ok bool
+	hh, _ = HTTPHandle(ctx, HTTPClient(httpmock{Client: &http.Client{}, ok: &ok}))
+	httpa, _ = NewAdapter(hh)
 	r, err = httpa.Reader("https://storage.googleapis.com/godal-ci-data-public/test.tif")
 	assert.NoError(t, err)
 	assert.Equal(t, int64(212), r.Size())
+	assert.True(t, ok)
 }
